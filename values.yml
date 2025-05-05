@@ -1,0 +1,41 @@
+host: rocketchat.apps.rm3.7wse.p1.openshiftapps.com
+ingress:
+  enabled: true
+  annotations:
+    route.openshift.io/termination: edge
+
+securityContext:
+  enabled: false
+
+serviceAccount:
+  create: true
+
+# MongoDB configurations tuned for OpenShift
+mongodb:
+  enabled: true
+  auth:
+    usernames:
+      - rocketchat
+    passwords:
+      - 80yqU4776r6K1v2JFh
+    databases:
+      - rocketchat
+    rootPassword: 80yqU4776r6K1v2JFh
+  # OpenShift-specific security settings for MongoDB
+  securityContext:
+    enabled: false
+  podSecurityContext:
+    enabled: false
+  containerSecurityContext:
+    enabled: false
+  volumePermissions:
+    enabled: false
+  # Use emptyDir for development to avoid PVC issues
+  persistence:
+    enabled: false
+    # If you want persistence, comment out the line above and uncomment these:
+    # storageClass: ""
+    # size: 8Gi
+  # Configuration for replica set (required by RocketChat)
+  architecture: replicaset
+  replicaCount: 1
