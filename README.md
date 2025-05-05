@@ -78,7 +78,7 @@ mongodb:
 ### 3. Deploy RocketChat
 
 ```bash
-# Create a new project (optional)
+# Create a new project (optional) The Developer Sandbox gives you one project namespace.
 oc new-project rocketchat
 
 # Deploy using Helm
@@ -122,20 +122,20 @@ oc get pods | grep mongodb
 
 - This deployment provides a free RocketChat Starter plan (limited to 50 users)
 - For production deployments, consider using external MongoDB instance
-- Always backup your data before upgrading
+- Always backup your data before upgrading!
 
 ## Why a Custom Values File Matters
 
 The `values.yml` file is critical for successful deployment on OpenShift because:
 
-1. **OpenShift Security**: OpenShift enforces stricter security policies than standard Kubernetes. Our values file disables security contexts that would conflict with OpenShift's Security Context Constraints.
+1. **OpenShift Security**: OpenShift enforces stricter security policies than standard Kubernetes. The values file disables security contexts that would conflict with OpenShift's Security Context Constraints.
 
 2. **Application Configuration**: It allows us to configure hostnames, MongoDB credentials, and persistence options without modifying the original chart.
 
-3. **Troubleshooting**: Many common deployment issues in OpenShift (like the ones we encountered) can be solved with proper values configuration rather than custom chart modifications.
+3. **Troubleshooting**: Many common deployment issues in OpenShift can be solved with proper values configuration rather than custom chart modifications.
 
 4. **Reproducibility**: Having a values file makes it easy to recreate or upgrade your deployment consistently.
 
-## License Considerations
+## License Considerations for Rocketchat
 
 RocketChat versions 6.5+ use a "Starter plan" licensing model that's free for up to 50 users. Beyond that, you'll need to purchase a Pro or Enterprise license.
