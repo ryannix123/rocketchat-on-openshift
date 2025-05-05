@@ -1,26 +1,34 @@
-host: rocketchat.apps.rm3.7wse.p1.openshiftapps.com
+host: my-rocketchat.server.com # The hostname for the Rocket.Chat server. OpenShift will provide a default route
 ingress:
   enabled: true
   annotations:
     route.openshift.io/termination: edge
 
+# Completely disable all security contexts
 securityContext:
   enabled: false
+podSecurityContext: {}
+containerSecurityContext: {}
 
 serviceAccount:
   create: true
+
+# Override the container security context directly
+extraEnv: |
+  - name: DEPLOY_METHOD
+    value: helm-chart
 
 # MongoDB configurations tuned for OpenShift
 mongodb:
   enabled: true
   auth:
     usernames:
-      - rocketchat
+    - rocketchat
     passwords:
-      - 80yqU4776r6K1v2JFh
+    - my-secure-password
     databases:
-      - rocketchat
-    rootPassword: 80yqU4776r6K1v2JFh
+    - rocketchat
+    rootPassword: my-secure-password
   # OpenShift-specific security settings for MongoDB
   securityContext:
     enabled: false
@@ -30,12 +38,8 @@ mongodb:
     enabled: false
   volumePermissions:
     enabled: false
-  # Use emptyDir for development to avoid PVC issues
   persistence:
-    enabled: false
-    # If you want persistence, comment out the line above and uncomment these:
-    # storageClass: ""
-    # size: 8Gi
-  # Configuration for replica set (required by RocketChat)
+    enabled: true
+    size: 8Gi
   architecture: replicaset
   replicaCount: 1
