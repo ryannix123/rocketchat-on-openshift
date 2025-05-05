@@ -1,6 +1,6 @@
 # 🚀 RocketChat on OpenShift
 
-A no-nonsense guide to deploying RocketChat on Red Hat OpenShift using Helm.
+A guide to deploying RocketChat on Red Hat OpenShift using [RocketChat's official Helm chart](https://github.com/RocketChat/helm-charts).
 
 ## 🏝️ Getting a Free OpenShift Sandbox
 
