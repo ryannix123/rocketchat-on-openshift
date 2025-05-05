@@ -2,6 +2,25 @@
 
 A no-nonsense guide to deploying RocketChat on Red Hat OpenShift using Helm.
 
+## Getting a Free OpenShift Sandbox
+
+Before you start, you can get a free OpenShift environment through Red Hat's Developer Sandbox:
+
+1. Visit [developers.redhat.com/developer-sandbox](https://developers.redhat.com/developer-sandbox)
+2. Click the "Start your sandbox for free" button
+3. Sign in with your Red Hat account (or create one if you don't have it)
+4. Complete the registration process
+5. Once approved, click "Start using your sandbox"
+6. Select the "DevSandbox" login option when prompted
+
+The Developer Sandbox provides:
+- A free OpenShift environment valid for 30 days
+- 8-10 GB of memory and about 4 CPU cores
+- Pre-configured developer tools
+- No credit card required
+
+**Note:** The Developer Sandbox has resource limitations but is perfect for testing RocketChat deployment before moving to a production environment.
+
 ## Prerequisites
 
 - OpenShift cluster (no admin access required)
@@ -78,7 +97,7 @@ mongodb:
 ### 3. Deploy RocketChat
 
 ```bash
-# Create a new project (optional) The Developer Sandbox gives you one project namespace.
+# Create a new project (optional)
 oc new-project rocketchat
 
 # Deploy using Helm
@@ -128,14 +147,14 @@ oc get pods | grep mongodb
 
 The `values.yml` file is critical for successful deployment on OpenShift because:
 
-1. **OpenShift Security**: OpenShift enforces stricter security policies than standard Kubernetes. The values file disables security contexts that would conflict with OpenShift's Security Context Constraints.
+1. **OpenShift Security**: OpenShift enforces stricter security policies than standard Kubernetes. The values file disables security contexts that would conflict with OpenShift's Security Context Constraints (SCC) **without compromising cluster security**.
 
-2. **Application Configuration**: It allows us to configure hostnames, MongoDB credentials, and persistence options without modifying the original chart.
+2. **Application Configuration**: It allows us to configure hostnames, MongoDB credentials, and persistence options without modifying Rockchat's official chart.
 
 3. **Troubleshooting**: Many common deployment issues in OpenShift can be solved with proper values configuration rather than custom chart modifications.
 
 4. **Reproducibility**: Having a values file makes it easy to recreate or upgrade your deployment consistently.
 
-## License Considerations for Rocketchat
+## License Considerations for RocketChat
 
 RocketChat versions 6.5+ use a "Starter plan" licensing model that's free for up to 50 users. Beyond that, you'll need to purchase a Pro or Enterprise license.
