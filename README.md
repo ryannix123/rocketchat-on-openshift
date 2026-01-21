@@ -319,7 +319,7 @@ oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --r
 * This deployment uses RocketChat's Starter plan (free for up to 50 users)
 * For production, consider using MongoDB with replication (MongoDB Community Operator)
 * Always backup your MongoDB data before upgrading!
-* The Developer Sandbox resets after 30 days of inactivity
+* The Developer Sandbox is not for production and resets after 30 days
 
 ## 🔗 References
 
@@ -327,7 +327,3 @@ oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --r
 * [MongoDB Community Server Images](https://hub.docker.com/r/mongodb/mongodb-community-server)
 * [RocketChat Forum: Moving from Bitnami to Official MongoDB](https://forums.rocket.chat/t/action-required-moving-from-bitnami-to-official-mongodb-chart/22679)
 * [OpenShift Developer Sandbox](https://developers.redhat.com/developer-sandbox)
-
-## 📜 License
-
-This guide is provided as-is. RocketChat versions 6.5+ use a "Starter plan" licensing model that's free for up to 50 users.
