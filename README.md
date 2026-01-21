@@ -2,6 +2,8 @@
 
 A guide to deploying RocketChat on Red Hat OpenShift using [RocketChat's official Helm chart](https://github.com/RocketChat/helm-charts).
 
+> ⚠️ **January 2025 Update**: Bitnami has discontinued MongoDB images following the VMware/Broadcom acquisition. RocketChat 8.x requires MongoDB 7.0+, which is no longer available from Bitnami. This guide uses the official MongoDB Community Server image deployed separately from the Helm chart.
+
 ## 🏝️ Getting a Free OpenShift Sandbox
 
 Before you start, you can get a free OpenShift environment through Red Hat's Developer Sandbox:
@@ -14,43 +16,214 @@ Before you start, you can get a free OpenShift environment through Red Hat's Dev
 6. Select the "DevSandbox" login option when prompted
 
 The Developer Sandbox provides:
-- A free OpenShift environment valid for 30 days
-- 8-10 GB of memory and about 4 CPU cores
-- Pre-configured developer tools
-- No credit card required
 
-**Note:** The Developer Sandbox has resource limitations but is perfect for testing RocketChat deployment before moving to a production environment.
+* A free OpenShift environment valid for 30 days
+* 8-10 GB of memory and about 4 CPU cores
+* Pre-configured developer tools
+* No credit card required
 
 ## 🛠️ Prerequisites
 
-- OpenShift cluster (no admin access required)
-- Helm 3.x installed
-- `oc` CLI tool configured
+* OpenShift cluster (no admin access required)
+* Helm 3.x installed
+* `oc` CLI tool configured
+
+## ⚡ Quick Start
+
+```bash
+# Clone this repo
+git clone https://github.com/ryannix123/rocketchat-on-openshift.git
+cd rocketchat-on-openshift
+
+# Edit values.yml with your domain and namespace
+# Edit mongodb-standalone.yaml with a secure password
+
+# Run setup and deploy
+chmod +x setup.sh
+./setup.sh
+oc apply -f mongodb-standalone.yaml
+oc get pods -w  # Wait for MongoDB to be Running
+helm install rocketchat ./rocketchat -f values.yml -n <your-namespace>
+```
+
+## 📋 Why This Approach?
+
+RocketChat's Helm chart has two issues that prevent it from working on OpenShift out of the box:
+
+1. **Bitnami MongoDB Deprecation**: The bundled Bitnami MongoDB subchart only provides MongoDB 6.0, but RocketChat 8.x requires MongoDB 7.0+. Bitnami has stopped publishing new MongoDB images.
+
+2. **Hardcoded Security Contexts**: The Helm chart hardcodes `runAsUser: 999` and `fsGroup: 999`, which conflict with OpenShift's restricted Security Context Constraints (SCC). OpenShift requires UIDs within a project-specific range (e.g., 1006350000-1006359999).
+
+**Our solution**:
+- Deploy MongoDB separately using the official `mongodb/mongodb-community-server:8.0-ubi9` image
+- Patch the RocketChat Helm chart locally to remove hardcoded security contexts
+- Connect RocketChat to the external MongoDB instance
 
 ## 🚢 Deployment Steps
 
-### 1️⃣ Add the RocketChat Helm repository
+### 1️⃣ Create your OpenShift project
 
 ```bash
-helm repo add rocketchat https://rocketchat.github.io/helm-charts
-helm repo update
+oc new-project rocketchat
+# Or use your existing project
+oc project <your-project>
 ```
 
-### 2️⃣ Create OpenShift-compatible values file
+### 2️⃣ Deploy MongoDB
 
-Create a file named `values.yml` with the following content. This file is necessary because:
+Deploy MongoDB using the official MongoDB Community Server image (UBI-based for OpenShift compatibility):
 
-1. **OpenShift Security Compatibility**: OpenShift uses Security Context Constraints (SCCs) that restrict pod execution. The standard RocketChat Helm chart needs adjustments to comply with these restrictions. Instead, we're telling the Helm chart not to specify explicit user IDs and group IDs that would conflict with OpenShift's security model.
+```bash
+oc apply -f mongodb-standalone.yaml
+```
 
-2. **MongoDB Configuration**: RocketChat requires specific MongoDB settings (including credentials in array format) that must be explicitly configured. The values file lets OpenShift's security model handle the container security rather than trying to override it with potentially conflicting settings.
+Wait for MongoDB to be ready:
 
-3. **Route Configuration**: We need to set up proper OpenShift Routes for external access.
+```bash
+oc get pods -w
+# Wait until mongodb pod shows Running 1/1
+```
 
-4. **Custom Deployment Parameters**: The values file lets us customize the deployment without modifying the chart itself.
+### 3️⃣ Pull and patch the RocketChat Helm chart
+
+The Helm chart has hardcoded security context values (`runAsUser: 999`, `fsGroup: 999`) that conflict with OpenShift's Security Context Constraints. Run the setup script to pull and patch the chart:
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+This script:
+- Adds the RocketChat Helm repository
+- Pulls the chart locally
+- Comments out the hardcoded security contexts in `rocketchat/values.yaml`
+
+### 4️⃣ Deploy RocketChat
+
+Update `values.yml` with your domain, then deploy:
+
+```bash
+helm install rocketchat ./rocketchat -f values.yml -n <your-namespace>
+```
+
+### 5️⃣ Access your RocketChat instance
+
+Get the route URL:
+
+```bash
+oc get route -n <your-namespace>
+```
+
+Open the URL in your browser to complete the RocketChat setup wizard.
+
+## 📁 Configuration Files
+
+### mongodb-standalone.yaml
+
+Deploys MongoDB 8.0 using the official UBI-based image:
 
 ```yaml
-# Domain configuration
-host: rocketchat.your-apps-domain.com  # Replace with your actual domain
+---
+# MongoDB Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-secret
+type: Opaque
+stringData:
+  MONGO_INITDB_ROOT_USERNAME: admin
+  MONGO_INITDB_ROOT_PASSWORD: <your-secure-password>
+
+---
+# MongoDB PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# MongoDB Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  labels:
+    app: mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongodb/mongodb-community-server:8.0-ubi9
+          ports:
+            - containerPort: 27017
+              name: mongodb
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-secret
+                  key: MONGO_INITDB_ROOT_PASSWORD
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+      volumes:
+        - name: mongodb-data
+          persistentVolumeClaim:
+            claimName: mongodb-data
+
+---
+# MongoDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  labels:
+    app: mongodb
+spec:
+  ports:
+    - port: 27017
+      targetPort: 27017
+      name: mongodb
+  selector:
+    app: mongodb
+  type: ClusterIP
+```
+
+### values.yml
+
+RocketChat Helm values for OpenShift with external MongoDB:
+
+```yaml
+# RocketChat values for OpenShift with external MongoDB
+
+# Domain configuration - UPDATE THIS
+host: rocketchat.apps.<your-cluster-domain>.com
 
 # Ingress configuration
 ingress:
@@ -58,103 +231,103 @@ ingress:
   annotations:
     route.openshift.io/termination: edge
 
-# Disable security contexts for OpenShift compatibility
-securityContext:
+# Disable built-in MongoDB - we deploy it separately
+mongodb:
   enabled: false
+
+# External MongoDB connection string - UPDATE PASSWORD
+externalMongodbUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/rocketchat?authSource=admin"
+externalMongodbOplogUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/local?authSource=admin"
+
+# Let OpenShift handle security contexts
+podSecurityContext: {}
+containerSecurityContext: {}
+securityContext: {}
 
 serviceAccount:
   create: true
 
-# MongoDB configuration
-mongodb:
-  enabled: true
-  auth:
-    # MongoDB credentials as arrays (required in newer versions)
-    usernames:
-      - rocketchat
-    passwords:
-      - your-secure-password  # Replace with a secure password
-    databases:
-      - rocketchat
-    rootPassword: your-secure-root-password  # Replace with a secure password
-  
-  # OpenShift compatibility settings
-  securityContext:
-    enabled: false
-  podSecurityContext:
-    enabled: false
-  containerSecurityContext:
-    enabled: false
-  volumePermissions:
-    enabled: false
-  
-  # For production, consider setting specific storage requirements
-  persistence:
-    enabled: true
-    size: 8Gi
+# Resource limits (adjust as needed)
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
 ```
-
-### 3️⃣ Deploy RocketChat
-
-```bash
-# Create a new project (optional)
-oc new-project rocketchat
-
-# Deploy using Helm
-helm install rocketchat rocketchat/rocketchat -f values.yml -n rocketchat
-```
-
-### 4️⃣ Access your RocketChat instance
-
-Once deployed, access your RocketChat instance at `https://rocketchat.your-apps-domain.com`.
 
 ## 🔧 Troubleshooting
 
-### 💥 Pod CrashLoopBackOff
+### 💥 Security Context Constraint Errors
 
-If pods enter CrashLoopBackOff state, check logs:
+If you see errors like:
+```
+unable to validate against any security context constraint: 
+.spec.securityContext.fsGroup: Invalid value: []int64{999}: 999 is not an allowed group
+```
+
+This means the Helm chart still has hardcoded security contexts. Re-run the setup script or verify the patch was applied:
 
 ```bash
-oc logs $(oc get pods -l "app.kubernetes.io/name=rocketchat" -o jsonpath='{.items[0].metadata.name}')
+grep -n "999" rocketchat/values.yaml
+```
+
+If you see uncommented `runAsUser: 999` or `fsGroup: 999`, run `./setup.sh` again or manually comment out those lines.
+
+### 💥 MongoDB Version Errors
+
+If RocketChat logs show:
+```
+YOUR CURRENT MONGODB VERSION IS NOT SUPPORTED BY ROCKET.CHAT,
+PLEASE UPGRADE TO VERSION 7.0 OR LATER
+```
+
+Ensure you're using the standalone MongoDB deployment with `mongodb/mongodb-community-server:8.0-ubi9`, not the Bitnami subchart.
+
+### 💥 Pod CrashLoopBackOff
+
+Check the logs:
+
+```bash
+oc logs deployment/rocketchat-rocketchat
+oc logs deployment/mongodb
 ```
 
 Common issues:
-- **MongoDB connection errors**: Verify MongoDB pods are running
-- **Security context issues**: Ensure all security contexts are disabled
-- **Resource limitations**: Check if pods are hitting resource limits
+- **MongoDB connection errors**: Verify MongoDB pod is running and the connection string in `values.yml` is correct
+- **Resource limitations**: Developer Sandbox has memory limits; check if pods are being OOMKilled
 
 ### 🔌 MongoDB Connection Errors
 
-If RocketChat can't connect to MongoDB, check that the MongoDB service exists:
+Verify MongoDB is accessible:
 
 ```bash
-oc get svc | grep mongodb
-```
-
-Ensure MongoDB pods are running:
-
-```bash
+# Check MongoDB pod
 oc get pods | grep mongodb
+
+# Check MongoDB service
+oc get svc mongodb
+
+# Test connection from inside the cluster
+oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --restart=Never -- \
+  mongosh "mongodb://admin:<password>@mongodb:27017/admin" --eval "db.runCommand({ping:1})"
 ```
 
 ## 📝 Notes
 
-- This deployment provides a free RocketChat Starter plan (limited to 50 users)
-- For production deployments, consider using external MongoDB instance
-- Always backup your data before upgrading!
+* This deployment uses RocketChat's Starter plan (free for up to 50 users)
+* For production, consider using MongoDB with replication (MongoDB Community Operator)
+* Always backup your MongoDB data before upgrading!
+* The Developer Sandbox resets after 30 days of inactivity
 
-## ❓ Why a Custom Values File Matters
+## 🔗 References
 
-The `values.yml` file is critical for successful deployment on OpenShift because:
+* [RocketChat Helm Charts](https://github.com/RocketChat/helm-charts)
+* [MongoDB Community Server Images](https://hub.docker.com/r/mongodb/mongodb-community-server)
+* [RocketChat Forum: Moving from Bitnami to Official MongoDB](https://forums.rocket.chat/t/action-required-moving-from-bitnami-to-official-mongodb-chart/22679)
+* [OpenShift Developer Sandbox](https://developers.redhat.com/developer-sandbox)
 
-1. **OpenShift Security**: OpenShift enforces stricter security policies than standard Kubernetes. Our values file disables security contexts that would conflict with OpenShift's Security Context Constraints.
+## 📜 License
 
-2. **Application Configuration**: It allows us to configure hostnames, MongoDB credentials, and persistence options without modifying the original chart.
-
-3. **Troubleshooting**: Many common deployment issues in OpenShift can be solved with proper values configuration rather than custom chart modifications.
-
-4. **Reproducibility**: Having a values file makes it easy to recreate or upgrade your deployment consistently.
-
-## 📜 License Considerations
-
-RocketChat versions 6.5+ use a "Starter plan" licensing model that's free for up to 50 users. Beyond that, you'll need to purchase a Pro or Enterprise license.
+This guide is provided as-is. RocketChat versions 6.5+ use a "Starter plan" licensing model that's free for up to 50 users.

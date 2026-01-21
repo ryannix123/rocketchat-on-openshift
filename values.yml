@@ -1,45 +1,52 @@
-host: my-rocketchat.server.com # The hostname for the Rocket.Chat server. OpenShift will provide a default route
+# RocketChat Helm values for OpenShift with external MongoDB
+#
+# ⚠️ UPDATE REQUIRED:
+#   1. Replace <your-apps-domain> with your OpenShift cluster's apps domain
+#   2. Replace <your-password> with the password from mongodb-standalone.yaml
+#   3. Replace <your-namespace> with your OpenShift project/namespace
+#
+# Example for Developer Sandbox:
+#   host: rocketchat.apps.rm3.7wse.p1.openshiftapps.com
+#   externalMongodbUrl: "mongodb://admin:change-me@mongodb.ryan-nix-dev.svc.cluster.local:27017/rocketchat?authSource=admin"
+
+# Domain configuration
+host: rocketchat.apps.<your-apps-domain>.com
+
+# Ingress configuration (creates OpenShift Route)
 ingress:
   enabled: true
   annotations:
     route.openshift.io/termination: edge
 
-# Completely disable all security contexts
-securityContext:
+# Disable built-in Bitnami MongoDB - we deploy MongoDB separately
+# This is required because:
+#   1. Bitnami discontinued MongoDB images (no MongoDB 7.0+ available)
+#   2. RocketChat 8.x requires MongoDB 7.0+
+#   3. Bitnami chart has hardcoded security contexts incompatible with OpenShift
+mongodb:
   enabled: false
+
+# External MongoDB connection strings
+# Format: mongodb://user:password@host:port/database?options
+externalMongodbUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/rocketchat?authSource=admin"
+externalMongodbOplogUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/local?authSource=admin"
+
+# Let OpenShift handle security contexts
+# These empty objects prevent the chart from setting any security context,
+# allowing OpenShift to assign appropriate UIDs from the project's range
 podSecurityContext: {}
 containerSecurityContext: {}
+securityContext: {}
 
 serviceAccount:
   create: true
 
-# Override the container security context directly
-extraEnv: |
-  - name: DEPLOY_METHOD
-    value: helm-chart
-
-# MongoDB configurations tuned for OpenShift
-mongodb:
-  enabled: true
-  auth:
-    usernames:
-    - rocketchat
-    passwords:
-    - my-secure-password
-    databases:
-    - rocketchat
-    rootPassword: my-secure-password
-  # OpenShift-specific security settings for MongoDB
-  securityContext:
-    enabled: false
-  podSecurityContext:
-    enabled: false
-  containerSecurityContext:
-    enabled: false
-  volumePermissions:
-    enabled: false
-  persistence:
-    enabled: true
-    size: 8Gi
-  architecture: replicaset
-  replicaCount: 1
+# Resource limits appropriate for Developer Sandbox
+# Adjust these for production deployments
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "250m"
+  limits:
+    memory: "2Gi"
+    cpu: "1000m"
