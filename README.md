@@ -2,7 +2,7 @@
 
 A guide to deploying RocketChat on Red Hat OpenShift using [RocketChat's official Helm chart](https://github.com/RocketChat/helm-charts).
 
-> ⚠️ **January 2025 Update**: Bitnami has discontinued MongoDB images following the VMware/Broadcom acquisition. RocketChat 8.x requires MongoDB 7.0+, which is no longer available from Bitnami. This guide uses the official MongoDB Community Server image deployed separately from the Helm chart.
+> ⚠️ **January 2025 Update**: Bitnami has discontinued MongoDB images following the VMware/Broadcom acquisition. RocketChat 8.x requires MongoDB 8.2+, which is no longer available from Bitnami. This guide uses the official MongoDB Community Server image deployed separately from the Helm chart.
 
 ## 🏝️ Getting a Free OpenShift Sandbox
 
@@ -23,7 +23,7 @@ The Developer Sandbox provides:
 * No credit card required
 * **Auto-hibernation** — Deployments scale to zero after 12 hours of inactivity
 
-### Waking Up Your Deployment
+### 😴 Waking Up Your Deployment
 
 When you return after the sandbox has hibernated, your pods will be scaled to zero. Use the deploy script or run the commands manually:
 
@@ -53,24 +53,27 @@ Your data persists in the PVCs — only the pods are stopped during hibernation.
 git clone https://github.com/ryannix123/rocketchat-on-openshift.git
 cd rocketchat-on-openshift
 
-# Edit values.yml with your domain and namespace
-# Edit mongodb-standalone.yaml with a secure password
-
-# Run setup and deploy
+# Deploy
 chmod +x deploy.sh
-./deploy.sh deploy
+./deploy.sh --host rocketchat.apps.<your-cluster-domain>.com
 ```
+
+That's it! The script will:
+- Pull and patch the Helm chart automatically
+- Generate a secure MongoDB password
+- Deploy MongoDB and RocketChat
+- Configure everything for your namespace
 
 ## 📋 Why This Approach?
 
 RocketChat's Helm chart has two issues that prevent it from working on OpenShift out of the box:
 
-1. **Bitnami MongoDB Deprecation**: The bundled Bitnami MongoDB subchart only provides MongoDB 6.0, but RocketChat 8.x requires MongoDB 7.0+. Bitnami has stopped publishing new MongoDB images.
+1. **Bitnami MongoDB Deprecation**: The bundled Bitnami MongoDB subchart only provides MongoDB 6.0, but RocketChat 8.x requires MongoDB 8.2+. Bitnami has stopped publishing new MongoDB images.
 
 2. **Hardcoded Security Contexts**: The Helm chart hardcodes `runAsUser: 999` and `fsGroup: 999`, which conflict with OpenShift's restricted Security Context Constraints (SCC). OpenShift requires UIDs within a project-specific range (e.g., 1006350000-1006359999).
 
 **Our solution**:
-- Deploy MongoDB separately using the official `mongodb/mongodb-community-server:8.0-ubi9` image
+- Deploy MongoDB separately using the official `mongodb/mongodb-community-server:8.2-ubi9` image
 - Patch the RocketChat Helm chart locally to remove hardcoded security contexts
 - Connect RocketChat to the external MongoDB instance
 
@@ -84,50 +87,31 @@ oc new-project rocketchat
 oc project <your-project>
 ```
 
-### 2️⃣ Deploy MongoDB
-
-Deploy MongoDB using the official MongoDB Community Server image (UBI-based for OpenShift compatibility):
+### 2️⃣ Find your OpenShift apps domain
 
 ```bash
-oc apply -f mongodb-standalone.yaml
+# Get your cluster's apps domain
+oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
+# Example output: apps.rm3.7wse.p1.openshiftapps.com
 ```
 
-Wait for MongoDB to be ready:
+### 3️⃣ Deploy RocketChat
 
 ```bash
-oc get pods -w
-# Wait until mongodb pod shows Running 1/1
+./deploy.sh --host rocketchat.apps.<your-cluster-domain>.com
+
+# Example for Developer Sandbox:
+./deploy.sh --host rocketchat.apps.rm3.7wse.p1.openshiftapps.com
 ```
 
-### 3️⃣ Pull and patch the RocketChat Helm chart
+The script automatically:
+- Pulls and patches the Helm chart (if not already done)
+- Generates a secure MongoDB password (stored in a Kubernetes Secret)
+- Deploys MongoDB with the official `mongodb/mongodb-community-server:8.2-ubi9` image
+- Deploys RocketChat configured to connect to MongoDB
+- Uses your current OpenShift project/namespace
 
-The Helm chart has hardcoded security context values (`runAsUser: 999`, `fsGroup: 999`) that conflict with OpenShift's Security Context Constraints. Run the deploy script to pull and patch the chart:
-
-```bash
-chmod +x deploy.sh
-./deploy.sh setup
-```
-
-This script:
-- Adds the RocketChat Helm repository
-- Pulls the chart locally
-- Comments out the hardcoded security contexts in `rocketchat/values.yaml`
-
-### 4️⃣ Deploy RocketChat
-
-Update `values.yml` with your domain and MongoDB password, then deploy:
-
-```bash
-# Deploy everything (MongoDB + RocketChat)
-./deploy.sh deploy
-
-# Or deploy manually:
-# oc apply -f mongodb-standalone.yaml -n <your-namespace>
-# oc rollout status deployment/mongodb -n <your-namespace>
-# helm install rocketchat ./rocketchat -f values.yml -n <your-namespace>
-```
-
-### 5️⃣ Access your RocketChat instance
+### 4️⃣ Access your RocketChat instance
 
 Get the route URL:
 
@@ -137,157 +121,23 @@ oc get route -n <your-namespace>
 
 Open the URL in your browser to complete the RocketChat setup wizard.
 
-## 📁 Configuration Files
+## 📁 Files in This Repository
 
-### mongodb-standalone.yaml
+| File | Description |
+|------|-------------|
+| `deploy.sh` | Main deployment script (deploy, cleanup, wakeup) |
+| `mongodb-standalone.yaml` | MongoDB manifest (reference only - deploy.sh creates resources directly) |
+| `values.yml` | RocketChat Helm values (reference only - deploy.sh passes values via --set) |
+| `README.md` | This documentation |
 
-Deploys MongoDB 8.0 using the official UBI-based image:
-
-```yaml
----
-# MongoDB Secret
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mongodb-secret
-type: Opaque
-stringData:
-  MONGO_INITDB_ROOT_USERNAME: admin
-  MONGO_INITDB_ROOT_PASSWORD: <your-secure-password>
-
----
-# MongoDB PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongodb-data
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-
----
-# MongoDB Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: mongodb
-  labels:
-    app: mongodb
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mongodb
-  template:
-    metadata:
-      labels:
-        app: mongodb
-    spec:
-      containers:
-        - name: mongodb
-          image: mongodb/mongodb-community-server:8.0-ubi9
-          ports:
-            - containerPort: 27017
-              name: mongodb
-          env:
-            - name: MONGO_INITDB_ROOT_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: mongodb-secret
-                  key: MONGO_INITDB_ROOT_USERNAME
-            - name: MONGO_INITDB_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mongodb-secret
-                  key: MONGO_INITDB_ROOT_PASSWORD
-          volumeMounts:
-            - name: mongodb-data
-              mountPath: /data/db
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "2Gi"
-              cpu: "1000m"
-      volumes:
-        - name: mongodb-data
-          persistentVolumeClaim:
-            claimName: mongodb-data
-
----
-# MongoDB Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: mongodb
-  labels:
-    app: mongodb
-spec:
-  ports:
-    - port: 27017
-      targetPort: 27017
-      name: mongodb
-  selector:
-    app: mongodb
-  type: ClusterIP
-```
-
-### values.yml
-
-RocketChat Helm values for OpenShift with external MongoDB:
-
-```yaml
-# RocketChat values for OpenShift with external MongoDB
-
-# Domain configuration - UPDATE THIS
-host: rocketchat.apps.<your-cluster-domain>.com
-
-# Ingress configuration
-ingress:
-  enabled: true
-  annotations:
-    route.openshift.io/termination: edge
-
-# Disable built-in MongoDB - we deploy it separately
-mongodb:
-  enabled: false
-
-# External MongoDB connection string - UPDATE PASSWORD
-externalMongodbUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/rocketchat?authSource=admin"
-externalMongodbOplogUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/local?authSource=admin"
-
-# Let OpenShift handle security contexts
-podSecurityContext: {}
-containerSecurityContext: {}
-securityContext: {}
-
-serviceAccount:
-  create: true
-
-# Resource limits (adjust as needed)
-resources:
-  requests:
-    memory: "512Mi"
-    cpu: "250m"
-  limits:
-    memory: "2Gi"
-    cpu: "1000m"
-```
+> **Note:** The `deploy.sh` script handles all configuration automatically. The YAML files are provided for reference and manual deployments.
 
 ## 🧹 Cleanup
 
-To remove the deployment:
+To remove the entire deployment including all data:
 
 ```bash
-# Remove RocketChat and MongoDB (keeps PVCs/data)
 ./deploy.sh cleanup
-
-# Remove everything including persistent data
-./deploy.sh cleanup-all
 ```
 
 ## 🔧 Troubleshooting
@@ -313,10 +163,10 @@ If you see uncommented `runAsUser: 999` or `fsGroup: 999`, run `./deploy.sh setu
 If RocketChat logs show:
 ```
 YOUR CURRENT MONGODB VERSION IS NOT SUPPORTED BY ROCKET.CHAT,
-PLEASE UPGRADE TO VERSION 7.0 OR LATER
+PLEASE UPGRADE TO VERSION 8.2 OR LATER
 ```
 
-Ensure you're using the standalone MongoDB deployment with `mongodb/mongodb-community-server:8.0-ubi9`, not the Bitnami subchart.
+Ensure you're using the standalone MongoDB deployment with `mongodb/mongodb-community-server:8.2-ubi9`, not the Bitnami subchart.
 
 ### 💥 Pod CrashLoopBackOff
 
@@ -343,7 +193,7 @@ oc get pods | grep mongodb
 oc get svc mongodb
 
 # Test connection from inside the cluster
-oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --restart=Never -- \
+oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.2-ubi9 --restart=Never -- \
   mongosh "mongodb://admin:<password>@mongodb:27017/admin" --eval "db.runCommand({ping:1})"
 ```
 

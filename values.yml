@@ -1,13 +1,17 @@
 # RocketChat Helm values for OpenShift with external MongoDB
 #
-# ⚠️ UPDATE REQUIRED:
-#   1. Replace <your-apps-domain> with your OpenShift cluster's apps domain
-#   2. Replace <your-password> with the password from mongodb-standalone.yaml
-#   3. Replace <your-namespace> with your OpenShift project/namespace
+# ℹ️  NOTE: This file is for REFERENCE ONLY.
+#     The deploy.sh script handles all configuration automatically via --set flags.
+#     You don't need to edit this file unless you want to do a manual deployment.
 #
-# Example for Developer Sandbox:
-#   host: rocketchat.apps.rm3.7wse.p1.openshiftapps.com
-#   externalMongodbUrl: "mongodb://admin:change-me@mongodb.ryan-nix-dev.svc.cluster.local:27017/rocketchat?authSource=admin"
+# For manual deployment without deploy.sh:
+#   1. Replace <your-apps-domain> with your OpenShift cluster's apps domain
+#   2. Replace <your-password> with a secure password
+#   3. Replace <your-namespace> with your OpenShift project/namespace
+#   4. Run: helm install rocketchat ./rocketchat -f values.yml
+#
+# The deploy.sh script does all of this automatically:
+#   ./deploy.sh --host rocketchat.apps.example.com
 
 # Domain configuration
 host: rocketchat.apps.<your-apps-domain>.com
@@ -20,13 +24,14 @@ ingress:
 
 # Disable built-in Bitnami MongoDB - we deploy MongoDB separately
 # This is required because:
-#   1. Bitnami discontinued MongoDB images (no MongoDB 7.0+ available)
-#   2. RocketChat 8.x requires MongoDB 7.0+
+#   1. Bitnami discontinued MongoDB images (no MongoDB 8.2+ available)
+#   2. RocketChat 8.x requires MongoDB 8.2+
 #   3. Bitnami chart has hardcoded security contexts incompatible with OpenShift
 mongodb:
   enabled: false
 
 # External MongoDB connection strings
+# The deploy.sh script generates these automatically with the correct password and namespace.
 # Format: mongodb://user:password@host:port/database?options
 externalMongodbUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/rocketchat?authSource=admin"
 externalMongodbOplogUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/local?authSource=admin"

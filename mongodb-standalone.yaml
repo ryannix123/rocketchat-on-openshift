@@ -1,14 +1,17 @@
----
-# MongoDB Secret
-# ⚠️ UPDATE: Replace passwords with secure values before deploying!
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mongodb-secret
-type: Opaque
-stringData:
-  MONGO_INITDB_ROOT_USERNAME: admin
-  MONGO_INITDB_ROOT_PASSWORD: change-me-to-secure-password
+# MongoDB Standalone Deployment for OpenShift
+#
+# ℹ️  NOTE: This file is for REFERENCE ONLY.
+#     The deploy.sh script creates these resources automatically with a generated password.
+#     You don't need to apply this file manually unless doing a custom deployment.
+#
+# For manual deployment without deploy.sh:
+#   1. Create a secret: oc create secret generic mongodb-secret \
+#        --from-literal=MONGO_INITDB_ROOT_USERNAME=admin \
+#        --from-literal=MONGO_INITDB_ROOT_PASSWORD=<your-secure-password>
+#   2. Apply this file: oc apply -f mongodb-standalone.yaml
+#
+# The deploy.sh script does all of this automatically:
+#   ./deploy.sh --host rocketchat.apps.example.com
 
 ---
 # MongoDB PVC
@@ -50,7 +53,7 @@ spec:
       # No securityContext specified - let OpenShift assign appropriate values
       containers:
         - name: mongodb
-          image: mongodb/mongodb-community-server:8.0-ubi9
+          image: mongodb/mongodb-community-server:8.2.5-ubi9
           ports:
             - containerPort: 27017
               name: mongodb
