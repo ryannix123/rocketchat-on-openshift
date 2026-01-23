@@ -21,6 +21,27 @@ The Developer Sandbox provides:
 * 8-10 GB of memory and about 4 CPU cores
 * Pre-configured developer tools
 * No credit card required
+* **Auto-hibernation** — Deployments scale to zero after 12 hours of inactivity
+
+### 😴 Waking Up Your Deployment
+
+When you return after the sandbox has hibernated, your pods will be scaled to zero. Run these commands to bring everything back up:
+
+```bash
+# Scale MongoDB first (RocketChat depends on it)
+oc scale deployment mongodb --replicas=1 -n <your-namespace>
+
+# Wait for MongoDB to be ready
+oc rollout status deployment/mongodb -n <your-namespace>
+
+# Scale all Deployments
+oc scale deployment --all --replicas=1 -n <your-namespace>
+
+# Scale StatefulSets (NATS uses a StatefulSet, not a Deployment)
+oc scale statefulset --all --replicas=1 -n <your-namespace>
+```
+
+Your data persists in the PVCs — only the pods are stopped during hibernation. Give RocketChat a minute or two to reconnect to MongoDB after scaling up.
 
 ## 🛠️ Prerequisites
 
@@ -319,7 +340,7 @@ oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --r
 * This deployment uses RocketChat's Starter plan (free for up to 50 users)
 * For production, consider using MongoDB with replication (MongoDB Community Operator)
 * Always backup your MongoDB data before upgrading!
-* The Developer Sandbox is not for production and resets after 30 days
+* The Developer Sandbox resets after 30 days of inactivity
 
 ## 🔗 References
 
@@ -327,3 +348,7 @@ oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --r
 * [MongoDB Community Server Images](https://hub.docker.com/r/mongodb/mongodb-community-server)
 * [RocketChat Forum: Moving from Bitnami to Official MongoDB](https://forums.rocket.chat/t/action-required-moving-from-bitnami-to-official-mongodb-chart/22679)
 * [OpenShift Developer Sandbox](https://developers.redhat.com/developer-sandbox)
+
+## 📜 License
+
+This guide is provided as-is. RocketChat versions 6.5+ use a "Starter plan" licensing model that's free for up to 50 users.
