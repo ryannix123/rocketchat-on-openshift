@@ -10,7 +10,7 @@ Before you start, you can get a free OpenShift environment through Red Hat's Dev
 
 1. Visit [developers.redhat.com/developer-sandbox](https://developers.redhat.com/developer-sandbox)
 2. Click the "Start your sandbox for free" button
-3. Sign in with your Red Hat account (or create one: it's free!)
+3. Sign in with your Red Hat account (or create one if you don't have it)
 4. Complete the registration process
 5. Once approved, click "Start using your sandbox"
 6. Select the "DevSandbox" login option when prompted
@@ -31,18 +31,11 @@ When you return after the sandbox has hibernated, your pods will be scaled to ze
 # Option 1: Use the deploy script
 ./deploy.sh wakeup
 
-# Option 2: Manual commands
-# Scale MongoDB first (RocketChat depends on it)
-oc scale deployment mongodb --replicas=1 -n <your-namespace>
-
-# Wait for MongoDB to be ready
-oc rollout status deployment/mongodb -n <your-namespace>
-
-# Scale all Deployments
-oc scale deployment --all --replicas=1 -n <your-namespace>
-
-# Scale StatefulSets (NATS uses a StatefulSet, not a Deployment)
-oc scale statefulset --all --replicas=1 -n <your-namespace>
+# Option 2: Manual commands (uses current project)
+oc scale deployment mongodb --replicas=1
+oc rollout status deployment/mongodb
+oc scale deployment --all --replicas=1
+oc scale statefulset --all --replicas=1
 ```
 
 Your data persists in the PVCs — only the pods are stopped during hibernation. Give RocketChat a minute or two to reconnect to MongoDB after scaling up.
@@ -359,7 +352,7 @@ oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --r
 * This deployment uses RocketChat's Starter plan (free for up to 50 users)
 * For production, consider using MongoDB with replication (MongoDB Community Operator)
 * Always backup your MongoDB data before upgrading!
-* The Developer Sandbox is for testing and learning OpenShift. Your namespace resets after 30 days.
+* The Developer Sandbox resets after 30 days of inactivity
 
 ## 🔗 References
 
