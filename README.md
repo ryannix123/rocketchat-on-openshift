@@ -10,7 +10,7 @@ Before you start, you can get a free OpenShift environment through Red Hat's Dev
 
 1. Visit [developers.redhat.com/developer-sandbox](https://developers.redhat.com/developer-sandbox)
 2. Click the "Start your sandbox for free" button
-3. Sign in with your Red Hat account (or create one if you don't have it)
+3. Sign in with your Red Hat account (or create one: it's free!)
 4. Complete the registration process
 5. Once approved, click "Start using your sandbox"
 6. Select the "DevSandbox" login option when prompted
@@ -359,7 +359,7 @@ oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.0-ubi9 --r
 * This deployment uses RocketChat's Starter plan (free for up to 50 users)
 * For production, consider using MongoDB with replication (MongoDB Community Operator)
 * Always backup your MongoDB data before upgrading!
-* The Developer Sandbox resets after 30 days of inactivity
+* The Developer Sandbox is for testing and learning OpenShift. Your namespace resets after 30 days.
 
 ## 🔗 References
 
