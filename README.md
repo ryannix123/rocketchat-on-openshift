@@ -23,7 +23,7 @@ The Developer Sandbox provides:
 * No credit card required
 * **Auto-hibernation** — Deployments scale to zero after 12 hours of inactivity
 
-### 😴 Waking Up Your Deployment
+### Waking Up Your Deployment
 
 When you return after the sandbox has hibernated, your pods will be scaled to zero. Use the deploy script or run the commands manually:
 
