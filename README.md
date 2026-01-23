@@ -25,9 +25,13 @@ The Developer Sandbox provides:
 
 ### 😴 Waking Up Your Deployment
 
-When you return after the sandbox has hibernated, your pods will be scaled to zero. Run these commands to bring everything back up:
+When you return after the sandbox has hibernated, your pods will be scaled to zero. Use the deploy script or run the commands manually:
 
 ```bash
+# Option 1: Use the deploy script
+./deploy.sh wakeup
+
+# Option 2: Manual commands
 # Scale MongoDB first (RocketChat depends on it)
 oc scale deployment mongodb --replicas=1 -n <your-namespace>
 
@@ -60,11 +64,8 @@ cd rocketchat-on-openshift
 # Edit mongodb-standalone.yaml with a secure password
 
 # Run setup and deploy
-chmod +x setup.sh
-./setup.sh
-oc apply -f mongodb-standalone.yaml
-oc get pods -w  # Wait for MongoDB to be Running
-helm install rocketchat ./rocketchat -f values.yml -n <your-namespace>
+chmod +x deploy.sh
+./deploy.sh deploy
 ```
 
 ## 📋 Why This Approach?
@@ -107,11 +108,11 @@ oc get pods -w
 
 ### 3️⃣ Pull and patch the RocketChat Helm chart
 
-The Helm chart has hardcoded security context values (`runAsUser: 999`, `fsGroup: 999`) that conflict with OpenShift's Security Context Constraints. Run the setup script to pull and patch the chart:
+The Helm chart has hardcoded security context values (`runAsUser: 999`, `fsGroup: 999`) that conflict with OpenShift's Security Context Constraints. Run the deploy script to pull and patch the chart:
 
 ```bash
-chmod +x setup.sh
-./setup.sh
+chmod +x deploy.sh
+./deploy.sh setup
 ```
 
 This script:
@@ -121,10 +122,16 @@ This script:
 
 ### 4️⃣ Deploy RocketChat
 
-Update `values.yml` with your domain, then deploy:
+Update `values.yml` with your domain and MongoDB password, then deploy:
 
 ```bash
-helm install rocketchat ./rocketchat -f values.yml -n <your-namespace>
+# Deploy everything (MongoDB + RocketChat)
+./deploy.sh deploy
+
+# Or deploy manually:
+# oc apply -f mongodb-standalone.yaml -n <your-namespace>
+# oc rollout status deployment/mongodb -n <your-namespace>
+# helm install rocketchat ./rocketchat -f values.yml -n <your-namespace>
 ```
 
 ### 5️⃣ Access your RocketChat instance
@@ -278,6 +285,18 @@ resources:
     cpu: "1000m"
 ```
 
+## 🧹 Cleanup
+
+To remove the deployment:
+
+```bash
+# Remove RocketChat and MongoDB (keeps PVCs/data)
+./deploy.sh cleanup
+
+# Remove everything including persistent data
+./deploy.sh cleanup-all
+```
+
 ## 🔧 Troubleshooting
 
 ### 💥 Security Context Constraint Errors
@@ -294,7 +313,7 @@ This means the Helm chart still has hardcoded security contexts. Re-run the setu
 grep -n "999" rocketchat/values.yaml
 ```
 
-If you see uncommented `runAsUser: 999` or `fsGroup: 999`, run `./setup.sh` again or manually comment out those lines.
+If you see uncommented `runAsUser: 999` or `fsGroup: 999`, run `./deploy.sh setup` again or manually comment out those lines.
 
 ### 💥 MongoDB Version Errors
 
