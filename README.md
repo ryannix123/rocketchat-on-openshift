@@ -3,7 +3,7 @@
 [![Rocket.Chat](https://img.shields.io/badge/Rocket.Chat-8.x-red?logo=rocketdotchat&logoColor=white)](https://rocket.chat)
 [![SCC](https://img.shields.io/badge/SCC-restricted-brightgreen)](https://docs.openshift.com/container-platform/latest/authentication/managing-security-context-constraints.html)
 [![MongoDB](https://img.shields.io/badge/MongoDB-8.2-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com)
-[![Node.js](https://img.shields.io/badge/Node.js-14.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Helm](https://img.shields.io/badge/Helm-Chart-0F1689?logo=helm&logoColor=white)](https://helm.sh)
 
 A guide to deploying RocketChat on Red Hat OpenShift using [RocketChat's official Helm chart](https://github.com/RocketChat/helm-charts).
