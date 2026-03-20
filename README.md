@@ -4,7 +4,7 @@
 [![Rocket.Chat](https://img.shields.io/badge/Rocket.Chat-8.x-red?logo=rocketdotchat&logoColor=white)](https://rocket.chat)
 [![SCC](https://img.shields.io/badge/SCC-restricted-brightgreen)](https://docs.openshift.com/container-platform/latest/authentication/managing-security-context-constraints.html)
 [![MongoDB](https://img.shields.io/badge/MongoDB-8.2-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com)
-[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Helm](https://img.shields.io/badge/Helm-Chart-0F1689?logo=helm&logoColor=white)](https://helm.sh)
 
 > **Deploy Rocket.Chat on OpenShift without ANY elevated privileges.** No `anyuid`. No `privileged`. Just pure, security-hardened container goodness designed for multi-tenancy.
@@ -46,7 +46,7 @@ Your data persists in the PVCs — only the pods are stopped during hibernation.
 
 ## ✨ Features
 
-- ✅ Rocket.Chat 8.x with Node.js 20 + Meteor 3.0
+- ✅ Rocket.Chat 8.x with Node.js 22 + Meteor 3.0
 - ✅ Runs as non-root (OpenShift restricted SCC compatible)
 - ✅ Official MongoDB Community Server 8.2 (UBI9-based) with single-node replica set
 - ✅ Helm chart with automatic SCC patching
@@ -117,7 +117,7 @@ oc new-project rocketchat
 ┌─────────────────────────▼───────────────────────────────────┐
 │                   Rocket.Chat Pod                           │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │           Node.js 20 + Meteor 3.0                    │   │
+│  │           Node.js 22 + Meteor 3.0                    │   │
 │  │                   (port 3000)                        │   │
 │  │                                                      │   │
 │  │   • Web interface                                    │   │
