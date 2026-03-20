@@ -32,7 +32,6 @@ When you return after the sandbox has hibernated, your pods will be scaled down.
 oc scale deployment mongodb --replicas=1
 oc rollout status deployment/mongodb
 oc scale deployment --all --replicas=1
-oc scale statefulset --all --replicas=1
 ```
 
 Your data persists in the PVCs — only the pods are stopped during hibernation. Give Rocket.Chat a minute or two to reconnect to MongoDB after scaling up.
@@ -49,12 +48,12 @@ Your data persists in the PVCs — only the pods are stopped during hibernation.
 
 - ✅ Rocket.Chat 8.x with Node.js 20 + Meteor 3.0
 - ✅ Runs as non-root (OpenShift restricted SCC compatible)
-- ✅ Official MongoDB Community Server 8.2 (UBI9-based) with replica set for oplog
+- ✅ Official MongoDB Community Server 8.2 (UBI9-based) with single-node replica set
 - ✅ Helm chart with automatic SCC patching
 - ✅ **Auto-detected hostname** — no manual route configuration needed
 - ✅ Persistent storage for MongoDB data
 - ✅ Auto-generated secure MongoDB credentials
-- ✅ Real-time messaging via oplog — no polling fallback
+- ✅ Real-time messaging via MongoDB change streams
 - ✅ Startup-aware health probes — no restarts during first-run setup
 - ✅ Optional admin pre-configuration — skip the setup wizard entirely
 - ✅ Works on Developer Sandbox (free tier!)
@@ -136,7 +135,7 @@ oc new-project rocketchat
 │  │        MongoDB Community Server 8.2 (UBI9)           │  │
 │  │     mongodb/mongodb-community-server:8.2-ubi9        │  │
 │  │          Single-node replica set (rs0)               │  │
-│  │          Oplog enabled for real-time events           │  │
+│  │          Change streams for real-time events          │  │
 │  └─────────────────────────┬────────────────────────────┘  │
 │                            │                               │
 │  ┌─────────────────────────▼────────────────────────────┐  │
@@ -219,7 +218,7 @@ When `--admin-user` is provided, the script injects these environment variables 
 
 | PVC | Size | Purpose |
 |-----|------|---------|
-| `mongodb-pvc` | 10Gi | MongoDB data storage |
+| `mongodb-data` | 10Gi | MongoDB data storage |
 
 ### Health Probes
 
@@ -232,9 +231,9 @@ The deployment uses tuned health probes to prevent pod restarts during Rocket.Ch
 
 MongoDB uses a `startupProbe` (30 attempts × 5s = 150s window) that gates liveness/readiness checks until the database is fully initialised.
 
-### MongoDB & Oplog
+### MongoDB & Change Streams
 
-MongoDB runs as a single-node replica set (`rs0`) to enable change streams for real-time events. The deploy script automatically initializes the replica set and injects the `MONGO_OPLOG_URL` environment variable.
+MongoDB runs as a single-node replica set (`rs0`) to enable change streams for real-time events. The deploy script automatically initializes the replica set, configures keyFile authentication, and injects the `MONGO_OPLOG_URL` environment variable.
 
 > **Note:** The Rocket.Chat admin panel may show "oplog Disabled" — this is a **cosmetic label** from before Meteor 3.0. Rocket.Chat 8.x uses MongoDB change streams (via the replica set) instead of direct oplog tailing. Real-time messaging works correctly.
 
@@ -246,8 +245,12 @@ Key values passed to Helm:
 
 ```yaml
 mongodb:
-  enabled: false  # Using external MongoDB
-externalMongodbUrl: mongodb://admin:<password>@mongodb:27017/rocketchat?authSource=admin
+  enabled: false          # Using external MongoDB
+microservices:
+  enabled: false          # Monolithic mode (single pod)
+nats:
+  enabled: false          # Not needed without microservices
+externalMongodbUrl: mongodb://admin:<password>@mongodb:27017/rocketchat?authSource=admin&replicaSet=rs0
 host: <auto-detected>
 ```
 
@@ -421,7 +424,7 @@ oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
 
 ## 🚀 Production Recommendations
 
-1. **MongoDB Replication** — Use MongoDB Community Operator for replica sets
+1. **MongoDB High Availability** — Use MongoDB Community Operator for multi-node replica sets
 2. **Object Storage** — Configure S3-compatible backend for file uploads
 3. **SMTP Configuration** — Set up email notifications
 4. **Resource Limits** — Tune based on user count
@@ -441,7 +444,7 @@ oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
 ## 📝 Notes
 
 - This deployment uses Rocket.Chat's Starter plan (free for up to 50 users)
-- For production, consider MongoDB with replication (MongoDB Community Operator)
+- MongoDB runs as a single-node replica set; for HA, consider the MongoDB Community Operator
 - Always backup your MongoDB data before upgrading!
 - The Developer Sandbox resets after 30 days of inactivity
 

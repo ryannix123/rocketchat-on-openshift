@@ -383,9 +383,8 @@ deploy() {
     # Deploy RocketChat with relaxed probes to prevent restarts during
     # first-run setup (admin registration, index creation, migrations).
     #
-    # When --admin-user is set, deploy with replicas=0 so we can inject
-    # env vars BEFORE RC boots. This avoids a second rollout from oc set env
-    # that would reset the wizard setting.
+    # Always deploys with replicas=0 so env vars (MONGO_OPLOG_URL, admin
+    # credentials) can be injected before RC boots. Prevents double-rollouts.
     # -----------------------------------------------------------------------
     echo "🚀 Deploying RocketChat..."
     local HELM_ARGS=(
@@ -521,7 +520,7 @@ CREDS
     chmod 600 rocketchat-credentials.txt
 
     echo ""
-    echo "✅ Deployment initiated!"
+    echo "✅ Deployment complete!"
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "📋 Deployment Summary"
@@ -590,10 +589,7 @@ wakeup() {
     oc scale deployment mongodb --replicas=1 -n "$NAMESPACE"
     oc rollout status deployment/mongodb -n "$NAMESPACE" --timeout=180s
 
-    echo "📊 Scaling up StatefulSets..."
-    oc scale statefulset --all --replicas=1 -n "$NAMESPACE"
-
-    echo "🚀 Scaling up remaining Deployments..."
+    echo "🚀 Scaling up RocketChat..."
     oc scale deployment --all --replicas=1 -n "$NAMESPACE"
 
     echo ""

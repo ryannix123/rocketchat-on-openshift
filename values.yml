@@ -27,6 +27,14 @@ ingress:
 mongodb:
   enabled: false
 
+# Disable microservices mode — run monolithic (single pod handles everything).
+# Microservices split (ddp-streamer, presence, authorization, account, NATS)
+# is only needed for large-scale deployments with 200+ concurrent users.
+microservices:
+  enabled: false
+nats:
+  enabled: false
+
 # External MongoDB connection strings
 # deploy.sh generates these automatically with the correct password and namespace
 externalMongodbUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/rocketchat?authSource=admin&replicaSet=rs0"
