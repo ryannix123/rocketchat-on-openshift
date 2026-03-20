@@ -49,10 +49,14 @@ Your data persists in the PVCs — only the pods are stopped during hibernation.
 
 - ✅ Rocket.Chat 8.x with Node.js 20 + Meteor 3.0
 - ✅ Runs as non-root (OpenShift restricted SCC compatible)
-- ✅ Official MongoDB Community Server 8.2 (UBI9-based)
+- ✅ Official MongoDB Community Server 8.2 (UBI9-based) with replica set for oplog
 - ✅ Helm chart with automatic SCC patching
+- ✅ **Auto-detected hostname** — no manual route configuration needed
 - ✅ Persistent storage for MongoDB data
 - ✅ Auto-generated secure MongoDB credentials
+- ✅ Real-time messaging via oplog — no polling fallback
+- ✅ Startup-aware health probes — no restarts during first-run setup
+- ✅ Optional admin pre-configuration — skip the setup wizard entirely
 - ✅ Works on Developer Sandbox (free tier!)
 
 ---
@@ -71,11 +75,19 @@ cd rocketchat-on-openshift
 # Login to your sandbox
 oc login --token=YOUR_TOKEN --server=https://api.sandbox.openshiftapps.com:6443
 
-# Deploy! 🎉
-./deploy.sh --host rocketchat.apps.your-sandbox.openshiftapps.com
+# Deploy! 🎉  (hostname is auto-detected)
+./deploy.sh
+
+# Or skip the setup wizard by pre-configuring an admin user
+./deploy.sh --admin-user admin --admin-email admin@example.com
 ```
 
-The script auto-detects your namespace and saves credentials to `rocketchat-credentials.txt`.
+The script auto-detects your namespace and apps domain, builds the route hostname, and saves all credentials (MongoDB + admin) to `rocketchat-credentials.txt`.
+
+> **Override the hostname** if you need a custom name:
+> ```bash
+> ./deploy.sh --host my-chat.apps.sandbox-m2.ll9k.p1.openshiftapps.com
+> ```
 
 ### Option 2: Full OpenShift Cluster
 
@@ -85,11 +97,11 @@ For production or self-managed clusters:
 # Create namespace
 oc new-project rocketchat
 
-# Find your cluster's apps domain
-oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
+# Deploy — hostname is auto-detected from cluster config
+./deploy.sh
 
-# Deploy with your hostname
-./deploy.sh --host rocketchat.apps.mycluster.example.com
+# Or deploy with admin pre-configured
+./deploy.sh --admin-user admin --admin-email admin@example.com
 ```
 
 ---
@@ -100,6 +112,7 @@ oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
 ┌─────────────────────────────────────────────────────────────┐
 │                     OpenShift Route                         │
 │                  (TLS edge termination)                     │
+│          auto-detected: <release>-<ns>.<apps-domain>        │
 └─────────────────────────┬───────────────────────────────────┘
                           │ :443 → :3000
 ┌─────────────────────────▼───────────────────────────────────┐
@@ -112,6 +125,7 @@ oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
 │  │   • REST API                                         │   │
 │  │   • Real-time messaging (WebSocket)                  │   │
 │  │   • File uploads                                     │   │
+│  │   • /health endpoint for probes                      │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                           │
@@ -121,6 +135,8 @@ oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │        MongoDB Community Server 8.2 (UBI9)           │  │
 │  │     mongodb/mongodb-community-server:8.2-ubi9        │  │
+│  │          Single-node replica set (rs0)               │  │
+│  │          Oplog enabled for real-time events           │  │
 │  └─────────────────────────┬────────────────────────────┘  │
 │                            │                               │
 │  ┌─────────────────────────▼────────────────────────────┐  │
@@ -146,20 +162,81 @@ oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
 
 ## ⚙️ Configuration
 
+### Hostname Auto-Detection
+
+The deploy script resolves the route hostname automatically using three strategies (in order):
+
+1. **Cluster ingress config** — `oc get ingresses.config/cluster` (works on full clusters)
+2. **API server URL** — infers `apps.<cluster>` from `api.<cluster>` (works on Developer Sandbox)
+3. **Existing routes** — parses the domain from any route already in the namespace
+
+The resulting hostname follows the pattern: `rocketchat-<namespace>.<apps-domain>`
+
+Override with `--host` if you need a custom name.
+
+### Admin Setup (Skip the Wizard)
+
+By default, Rocket.Chat shows a 4-step setup wizard on first launch. You can skip it entirely by passing `--admin-user` to the deploy script, which pre-configures the admin account and marks setup as complete:
+
+```bash
+# Auto-generate a password (saved to rocketchat-credentials.txt)
+./deploy.sh --admin-user admin --admin-email admin@example.com
+
+# Or provide your own password (must meet Rocket.Chat complexity requirements)
+./deploy.sh --admin-user admin --admin-pass 'MySecureP@ss123!' --admin-email admin@example.com
+```
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--admin-user` | No | — | Admin username; enables wizard skip when set |
+| `--admin-pass` | No | (generated) | Admin password; auto-generated if omitted |
+| `--admin-email` | No | `admin@example.com` | Admin email address |
+
+When `--admin-user` is provided, the script injects these environment variables into the Rocket.Chat pod:
+
+| Env Var | Purpose |
+|---------|---------|
+| `ADMIN_USERNAME` | Creates the admin account |
+| `ADMIN_PASS` | Sets the admin password |
+| `ADMIN_EMAIL` | Sets the admin email |
+| `OVERWRITE_SETTING_Show_Setup_Wizard` | Set to `completed` to skip the wizard |
+
+> **Password complexity**: Rocket.Chat requires at least 14 characters with uppercase, lowercase, number, and symbol. The auto-generated password meets these requirements. If you provide your own, make sure it does too — otherwise the admin account won't be created and you'll see the wizard anyway.
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MONGO_URL` | (auto-configured) | MongoDB connection string |
 | `MONGO_OPLOG_URL` | (auto-configured) | MongoDB oplog URL for real-time |
-| `ROOT_URL` | (from --host flag) | External URL for Rocket.Chat |
+| `ROOT_URL` | (auto-detected) | External URL for Rocket.Chat |
 | `PORT` | `3000` | Application port |
+| `ADMIN_USERNAME` | — | Admin user (set via `--admin-user`) |
+| `ADMIN_PASS` | — | Admin password (set via `--admin-pass`) |
+| `ADMIN_EMAIL` | — | Admin email (set via `--admin-email`) |
 
 ### Persistent Volumes
 
 | PVC | Size | Purpose |
 |-----|------|---------|
 | `mongodb-pvc` | 10Gi | MongoDB data storage |
+
+### Health Probes
+
+The deployment uses tuned health probes to prevent pod restarts during Rocket.Chat's first-run setup (admin registration, index creation, migrations):
+
+| Probe | Path | Initial Delay | Period | Timeout | Failure Threshold |
+|-------|------|---------------|--------|---------|-------------------|
+| Liveness | `/health` | 120s | 15s | 10s | 6 |
+| Readiness | `/health` | 30s | 10s | 5s | 6 |
+
+MongoDB uses a `startupProbe` (30 attempts × 5s = 150s window) that gates liveness/readiness checks until the database is fully initialised.
+
+### MongoDB & Oplog
+
+MongoDB runs as a single-node replica set (`rs0`) to enable change streams for real-time events. The deploy script automatically initializes the replica set and injects the `MONGO_OPLOG_URL` environment variable.
+
+> **Note:** The Rocket.Chat admin panel may show "oplog Disabled" — this is a **cosmetic label** from before Meteor 3.0. Rocket.Chat 8.x uses MongoDB change streams (via the replica set) instead of direct oplog tailing. Real-time messaging works correctly.
 
 ### Helm Values
 
@@ -171,7 +248,7 @@ Key values passed to Helm:
 mongodb:
   enabled: false  # Using external MongoDB
 externalMongodbUrl: mongodb://admin:<password>@mongodb:27017/rocketchat?authSource=admin
-host: <your-hostname>
+host: <auto-detected>
 ```
 
 ---
@@ -183,7 +260,7 @@ host: <your-hostname>
 cat rocketchat-credentials.txt
 
 # Or retrieve from secret
-oc get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d
+oc get secret mongodb-secret -o jsonpath='{.data.MONGODB_INITDB_ROOT_PASSWORD}' | base64 -d
 
 # Check Rocket.Chat logs
 oc logs deployment/rocketchat-rocketchat -f
@@ -192,7 +269,7 @@ oc logs deployment/rocketchat-rocketchat -f
 oc logs deployment/mongodb -f
 
 # Access MongoDB shell
-oc exec -it deployment/mongodb -- mongosh "mongodb://admin:$(oc get secret mongodb-secret -o jsonpath='{.data.password}' | base64 -d)@localhost:27017/admin"
+oc exec -it deployment/mongodb -- mongosh "mongodb://admin:$(oc get secret mongodb-secret -o jsonpath='{.data.MONGODB_INITDB_ROOT_PASSWORD}' | base64 -d)@localhost:27017/admin"
 
 # Test MongoDB connection
 oc exec deployment/mongodb -- mongosh "mongodb://admin:<password>@localhost:27017/admin" --eval "db.runCommand({ping:1})"
@@ -311,6 +388,7 @@ oc logs deployment/mongodb
 Common issues:
 - **MongoDB connection errors**: Verify MongoDB pod is running first
 - **Resource limitations**: Developer Sandbox has memory limits; check if pods are being OOMKilled
+- **Probe failures during first run**: The refactored probes should prevent this, but if you see restarts during admin setup, increase `livenessProbe.initialDelaySeconds` further
 
 ### MongoDB Connection Errors
 
@@ -324,6 +402,19 @@ oc get svc mongodb
 # Test connection from inside the cluster
 oc run mongo-test --rm -it --image=mongodb/mongodb-community-server:8.2-ubi9 --restart=Never -- \
   mongosh "mongodb://admin:<password>@mongodb:27017/admin" --eval "db.runCommand({ping:1})"
+```
+
+### Hostname Auto-Detection Failures
+
+If the deploy script can't determine the apps domain:
+
+```bash
+# Check what the script sees
+oc whoami --show-server
+oc get ingresses.config/cluster -o jsonpath='{.spec.domain}'
+
+# Fall back to explicit hostname
+./deploy.sh --host rocketchat.apps.mycluster.example.com
 ```
 
 ---

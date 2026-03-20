@@ -1,0 +1,12 @@
+dependencies:
+- name: mongodb
+  repository: https://charts.bitnami.com/bitnami
+  version: 13.18.5
+- name: postgresql
+  repository: https://charts.bitnami.com/bitnami
+  version: 15.5.38
+- name: nats
+  repository: https://nats-io.github.io/k8s/helm/charts
+  version: 0.15.1
+digest: sha256:a6832a00ca60b305ecde81f04ce852dea059609872a7ed2b610d7303bd09042b
+generated: "2026-03-07T00:15:05.979770316Z"

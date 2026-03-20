@@ -1,0 +1,35 @@
+apiVersion: v2
+appVersion: 8.2.0
+dependencies:
+- condition: mongodb.enabled
+  name: mongodb
+  repository: https://charts.bitnami.com/bitnami
+  version: 13.x.x
+- condition: postgresql.enabled
+  name: postgresql
+  repository: https://charts.bitnami.com/bitnami
+  version: 15.x.x
+- condition: nats.enabled, microservices.enabled
+  name: nats
+  repository: https://nats-io.github.io/k8s/helm/charts
+  version: 0.15.x
+description: Prepare to take off with the ultimate chat platform, experience the next
+  level of team communications
+home: https://rocket.chat/
+icon: https://raw.githubusercontent.com/RocketChat/Rocket.Chat.Artwork/master/Logos/icon.svg
+keywords:
+- chat
+- communication
+- http
+- web
+- application
+- nodejs
+- javascript
+- meteor
+maintainers:
+- email: cloud@rocket.chat
+  name: RocketChat
+name: rocketchat
+sources:
+- https://github.com/RocketChat/Docker.Official.Image/
+version: 6.32.1
