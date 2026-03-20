@@ -100,7 +100,7 @@ oc new-project rocketchat
 ./deploy.sh
 
 # Or deploy with admin pre-configured
-./deploy.sh --admin-user admin --admin-email admin@example.com
+./deploy.sh --admin-user admin --admin-pass 'MyP@ss1234567!'
 ```
 
 ---
