@@ -77,8 +77,8 @@ oc login --token=YOUR_TOKEN --server=https://api.sandbox.openshiftapps.com:6443
 # Deploy! 🎉  (hostname is auto-detected)
 ./deploy.sh
 
-# Or skip the setup wizard by pre-configuring an admin user
-./deploy.sh --admin-user admin --admin-email admin@example.com
+# Or skip the setup wizard by pre-configuring an admin user and its password
+./deploy.sh --admin-user admin --admin-pass 'MyP@ss1234567!'
 ```
 
 The script auto-detects your namespace and apps domain, builds the route hostname, and saves all credentials (MongoDB + admin) to `rocketchat-credentials.txt`.
