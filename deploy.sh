@@ -528,6 +528,16 @@ extraInitContainers:
 YAML
     fi
 
+    # Helm 4 uses server-side apply and refuses to overwrite fields last set
+    # by other tools — including this script's own `oc scale` / `oc set env`
+    # and any manual `oc set image`. Helm owns these fields, so force it.
+    # Helm 3 (client-side apply) doesn't have the flag and doesn't need it.
+    local HELM_MAJOR
+    HELM_MAJOR=$(helm version --template '{{.Version}}' 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')
+    if [ "${HELM_MAJOR:-3}" -ge 4 ] 2>/dev/null; then
+        HELM_ARGS+=(--force-conflicts)
+    fi
+
     helm upgrade --install "$RELEASE_NAME" ./rocketchat "${HELM_ARGS[@]}" "${HELM_FILES[@]}"
     [ -n "$OVERRIDES" ] && rm -f "$OVERRIDES"
 
