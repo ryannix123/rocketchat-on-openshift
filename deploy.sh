@@ -358,8 +358,16 @@ deploy() {
     # If admin-user is set, fill in defaults for pass and email
     if [ -n "$ADMIN_USER" ]; then
         if [ -z "$ADMIN_PASS" ]; then
-            ADMIN_PASS=$(generate_admin_password)
-            echo "🔐 Generated admin password (meets Rocket.Chat complexity requirements)"
+            # Reuse the password from a previous run: Rocket.Chat only creates the
+            # admin on first boot, so a new password here would never take effect.
+            ADMIN_PASS=$(oc get "deployment/${RELEASE_NAME}-rocketchat" -n "$NAMESPACE" \
+                -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ADMIN_PASS")].value}' 2>/dev/null || true)
+            if [ -n "$ADMIN_PASS" ]; then
+                echo "🔑 Reusing existing admin password from deployment"
+            else
+                ADMIN_PASS=$(generate_admin_password)
+                echo "🔐 Generated admin password (meets Rocket.Chat complexity requirements)"
+            fi
         fi
         ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
     fi
@@ -542,28 +550,8 @@ YAML
             MONGO_OPLOG_URL="$MONGO_OPLOG_URL"
     fi
 
-    # Scale up — RC boots once with all env vars already in place
-    echo "🚀 Scaling up RocketChat..."
-    oc scale "deployment/${RELEASE_NAME}-rocketchat" --replicas=1 -n "$NAMESPACE"
-
-    echo "⏳ Waiting for RocketChat to be ready..."
-    oc rollout status "deployment/${RELEASE_NAME}-rocketchat" -n "$NAMESPACE" --timeout=300s
-
-    # If admin was configured, flip the wizard setting in MongoDB.
-    # RC picks this up immediately via change streams.
-    if [ -n "$ADMIN_USER" ]; then
-        echo "🔧 Completing setup wizard via MongoDB..."
-        oc exec deployment/mongodb -n "$NAMESPACE" -- mongosh \
-            "mongodb://admin:${MONGODB_PASSWORD}@localhost:27017/rocketchat?authSource=admin" \
-            --quiet --eval '
-            db.rocketchat_settings.updateOne(
-                { _id: "Show_Setup_Wizard" },
-                { $set: { value: "completed" } }
-            )'
-        echo "✅ Setup wizard skipped — admin user configured"
-    fi
-
-    # Save credentials
+    # Save credentials BEFORE the long rollout wait, so a slow or failed
+    # image pull (e.g. Docker Hub rate limits) never loses the generated passwords.
     cat > rocketchat-credentials.txt <<CREDS
 RocketChat Deployment Credentials
 ==================================
@@ -587,6 +575,37 @@ CREDS
     fi
 
     chmod 600 rocketchat-credentials.txt
+    echo "💾 Credentials saved to rocketchat-credentials.txt"
+
+    # Scale up — RC boots once with all env vars already in place
+    echo "🚀 Scaling up RocketChat..."
+    oc scale "deployment/${RELEASE_NAME}-rocketchat" --replicas=1 -n "$NAMESPACE"
+
+    echo "⏳ Waiting for RocketChat to be ready..."
+    if ! oc rollout status "deployment/${RELEASE_NAME}-rocketchat" -n "$NAMESPACE" --timeout=600s; then
+        echo ""
+        echo "⚠️  RocketChat did not become ready within 10 minutes."
+        echo "   Credentials are already saved in rocketchat-credentials.txt."
+        echo "   Check for image pull problems (Docker Hub rate limits are common on the Sandbox):"
+        echo "     oc get events --sort-by=.lastTimestamp | grep -iE 'pull|image' | tail -5"
+        echo "   Once the pod is running, re-running this script is safe: it reuses the saved"
+        echo "   MongoDB password, and the admin account is only created on first boot."
+        exit 1
+    fi
+
+    # If admin was configured, flip the wizard setting in MongoDB.
+    # RC picks this up immediately via change streams.
+    if [ -n "$ADMIN_USER" ]; then
+        echo "🔧 Completing setup wizard via MongoDB..."
+        oc exec deployment/mongodb -n "$NAMESPACE" -- mongosh \
+            "mongodb://admin:${MONGODB_PASSWORD}@localhost:27017/rocketchat?authSource=admin" \
+            --quiet --eval '
+            db.rocketchat_settings.updateOne(
+                { _id: "Show_Setup_Wizard" },
+                { $set: { value: "completed" } }
+            )'
+        echo "✅ Setup wizard skipped — admin user configured"
+    fi
 
     echo ""
     echo "✅ Deployment complete!"
