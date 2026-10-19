@@ -7,11 +7,18 @@
 # For manual deployment without deploy.sh:
 #   1. Replace <your-password> with a secure password
 #   2. Replace <your-namespace> with your OpenShift project/namespace
-#   3. Run: helm install rocketchat ./rocketchat -f values.yml
+#   3. Pull the pinned chart:
+#        helm repo add rocketchat https://rocketchat.github.io/helm-charts
+#        helm pull rocketchat/rocketchat --version 7.0.2 --untar
+#   4. Run: helm install rocketchat ./rocketchat -f values.yml --set host=<your-host>
 #
 # The deploy.sh script auto-detects the hostname:
 #   ./deploy.sh                     # auto-detect
 #   ./deploy.sh --host custom.host  # explicit override
+
+# Pinned Rocket.Chat release (chart 7.0.2 defaults to 8.6.1)
+image:
+  tag: "8.8.1"
 
 # Ingress configuration
 # Disabled — deploy.sh creates an OpenShift Route explicitly via oc create route,
@@ -21,8 +28,8 @@ ingress:
 
 # Disable built-in Bitnami MongoDB - we deploy MongoDB separately
 # Required because:
-#   1. Bitnami discontinued MongoDB images (no MongoDB 8.2+ available)
-#   2. RocketChat 8.x requires MongoDB 8.2+
+#   1. Bitnami discontinued MongoDB images
+#   2. Rocket.Chat 8.x requires MongoDB 7.0+ (8.0+ recommended); we run 8.2
 #   3. Bitnami chart has hardcoded security contexts incompatible with OpenShift
 mongodb:
   enabled: false
@@ -40,12 +47,42 @@ nats:
 externalMongodbUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/rocketchat?authSource=admin&replicaSet=rs0"
 externalMongodbOplogUrl: "mongodb://admin:<your-password>@mongodb.<your-namespace>.svc.cluster.local:27017/local?authSource=admin&replicaSet=rs0"
 
-# Let OpenShift handle security contexts
-# These empty objects prevent the chart from setting any security context,
-# allowing OpenShift to assign UIDs from the project's range
-podSecurityContext: {}
-containerSecurityContext: {}
-securityContext: {}
+# Let OpenShift handle security contexts.
+# Must be null, not {}: Helm merges maps, so {} would keep the chart's
+# hardcoded runAsUser/fsGroup 65533, which the restricted SCC rejects.
+# null deletes the keys so OpenShift assigns a UID from the project's range.
+containerSecurityContext: null
+securityContext: null
+
+# Apps Engine (Rocket.Chat 8.5+) writes to its Deno cache, which the image
+# ships inside /app owned by UID 65533. Copy it into a writable emptyDir so
+# apps work under OpenShift's random UID.
+extraEnv:
+  - name: DENO_DIR
+    value: /deno-cache
+extraVolumes:
+  - name: deno-cache
+    emptyDir: {}
+extraVolumeMounts:
+  - name: deno-cache
+    mountPath: /deno-cache
+extraInitContainers:
+  - name: deno-cache-copy
+    image: '{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}'
+    command:
+      - sh
+      - -c
+      - |
+        src=$(find /app/bundle/programs/server/npm/node_modules/@rocket.chat -maxdepth 3 -type d -name .deno-cache 2>/dev/null | head -1)
+        [ -z "$src" ] && src=$(find /app -type d -name .deno-cache -prune 2>/dev/null | head -1)
+        if [ -n "$src" ]; then
+          cp -R "$src"/. /deno-cache/ && echo "Copied Deno cache from $src"
+        else
+          echo "WARNING: no .deno-cache found in image; Apps Engine apps may fail to start"
+        fi
+    volumeMounts:
+      - name: deno-cache
+        mountPath: /deno-cache
 
 serviceAccount:
   create: true

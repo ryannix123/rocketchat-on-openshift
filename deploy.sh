@@ -14,6 +14,11 @@ NAMESPACE="${NAMESPACE:-$(oc project -q 2>/dev/null || echo "rocketchat")}"
 MONGODB_SECRET_NAME="mongodb-secret"
 RELEASE_NAME="rocketchat"
 
+# Pinned, tested versions. Override with --chart-version / --rc-version or env vars.
+# Chart 7.x changed the image UID from 999 to 65533 (see setup_chart and DENO_DIR handling).
+CHART_VERSION="${CHART_VERSION:-7.0.2}"
+RC_VERSION="${RC_VERSION:-8.8.1}"
+
 show_help() {
     echo "🚀 RocketChat on OpenShift - Deployment Script"
     echo "==============================================="
@@ -31,6 +36,8 @@ show_help() {
     echo "  --admin-user <username> - Admin username (skips setup wizard)"
     echo "  --admin-pass <password> - Admin password (generated if --admin-user set without this)"
     echo "  --admin-email <email>   - Admin email (default: admin@example.com)"
+    echo "  --rc-version <version>  - Rocket.Chat image tag (default: $RC_VERSION)"
+    echo "  --chart-version <ver>   - Rocket.Chat Helm chart version (default: $CHART_VERSION)"
     echo ""
     echo "Examples:"
     echo "  $0                                                    # auto-detect, manual wizard"
@@ -124,26 +131,36 @@ resolve_host() {
     echo "$host"
 }
 
+installed_chart_version() {
+    [ -f rocketchat/Chart.yaml ] && awk '/^version:/{print $2; exit}' rocketchat/Chart.yaml
+}
+
 setup_chart() {
     echo "📦 Adding RocketChat Helm repository..."
     helm repo add rocketchat https://rocketchat.github.io/helm-charts 2>/dev/null || true
     helm repo update
 
-    echo "📥 Pulling RocketChat Helm chart..."
+    echo "📥 Pulling RocketChat Helm chart $CHART_VERSION..."
     rm -rf rocketchat/
-    helm pull rocketchat/rocketchat --untar
+    helm pull rocketchat/rocketchat --version "$CHART_VERSION" --untar
 
-    # Patch hardcoded UID/GID that conflict with OpenShift restricted SCC
+    # Comment out ANY hardcoded runAsUser/fsGroup (999 in chart 6.x, 65533 in 7.x).
+    # OpenShift's restricted SCC assigns a random UID from the namespace range instead.
+    # deploy() also passes securityContext=null as a second safeguard.
     echo "🔧 Patching security contexts for OpenShift compatibility..."
+    local expr='s/^([[:space:]]*)(runAsUser|fsGroup): [0-9]+/\1# \2: removed for OpenShift restricted SCC/'
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' 's/runAsUser: 999/# runAsUser: 999  # Commented out for OpenShift/g' rocketchat/values.yaml
-        sed -i '' 's/fsGroup: 999/# fsGroup: 999  # Commented out for OpenShift/g' rocketchat/values.yaml
+        sed -E -i '' "$expr" rocketchat/values.yaml
     else
-        sed -i 's/runAsUser: 999/# runAsUser: 999  # Commented out for OpenShift/g' rocketchat/values.yaml
-        sed -i 's/fsGroup: 999/# fsGroup: 999  # Commented out for OpenShift/g' rocketchat/values.yaml
+        sed -E -i "$expr" rocketchat/values.yaml
     fi
 
-    echo "✅ Chart patched successfully!"
+    if grep -qE '^[[:space:]]*(runAsUser|fsGroup): [0-9]+' rocketchat/values.yaml; then
+        echo "❌ Hardcoded UID/GID still present in rocketchat/values.yaml"
+        exit 1
+    fi
+
+    echo "✅ Chart $CHART_VERSION patched successfully!"
 }
 
 deploy_mongodb() {
@@ -332,6 +349,8 @@ deploy() {
             --admin-user)   ADMIN_USER="$2"; shift 2 ;;
             --admin-pass)   ADMIN_PASS="$2"; shift 2 ;;
             --admin-email)  ADMIN_EMAIL="$2"; shift 2 ;;
+            --rc-version)   RC_VERSION="$2"; shift 2 ;;
+            --chart-version) CHART_VERSION="$2"; shift 2 ;;
             *)              shift ;;
         esac
     done
@@ -347,7 +366,8 @@ deploy() {
 
     echo "🚀 RocketChat on OpenShift - Deployment"
     echo "========================================"
-    echo "Namespace: $NAMESPACE"
+    echo "Namespace:   $NAMESPACE"
+    echo "Rocket.Chat: $RC_VERSION (chart $CHART_VERSION)"
     echo ""
 
     # Resolve hostname (auto-detect or explicit)
@@ -355,9 +375,15 @@ deploy() {
     echo "🌐 Host: $HOST"
     echo ""
 
-    # Ensure chart is available
-    if [ ! -d "rocketchat" ]; then
-        echo "📦 Chart not found, running setup..."
+    # Ensure the pinned chart version is present (re-pull if missing or stale)
+    local CURRENT_CHART
+    CURRENT_CHART=$(installed_chart_version || true)
+    if [ "$CURRENT_CHART" != "$CHART_VERSION" ]; then
+        if [ -n "$CURRENT_CHART" ]; then
+            echo "📦 Local chart is $CURRENT_CHART, need $CHART_VERSION — refreshing..."
+        else
+            echo "📦 Chart not found, running setup..."
+        fi
         setup_chart
         echo ""
     fi
@@ -422,9 +448,52 @@ deploy() {
 
     # Always start with replicas=0 so we can inject env vars (MONGO_OPLOG_URL
     # at minimum) before RC boots. This prevents a double-rollout.
-    HELM_ARGS+=(--set replicaCount=0)
+    HELM_ARGS+=(--set replicaCount=0 --set image.tag="$RC_VERSION")
 
-    helm upgrade --install "$RELEASE_NAME" ./rocketchat "${HELM_ARGS[@]}"
+    # -----------------------------------------------------------------------
+    # Apps Engine fix for OpenShift's random UID (Rocket.Chat 8.5+).
+    #
+    # The Apps Engine runs apps under Deno with DENO_DIR defaulting to a
+    # pre-built .deno-cache inside /app, owned by UID 65533 and not writable
+    # by the root group. OpenShift's arbitrary UID can read it but not write
+    # it, so marketplace apps fail to start. An init container copies the
+    # cache into a writable emptyDir, and DENO_DIR points the runtime there.
+    # -----------------------------------------------------------------------
+    local OVERRIDES
+    # Trailing X's only: BSD/macOS mktemp does not randomize X's before a suffix
+    OVERRIDES=$(mktemp "${TMPDIR:-/tmp}/rocketchat-openshift.XXXXXX")
+    trap 'rm -f "$OVERRIDES"' EXIT
+    cat > "$OVERRIDES" <<'YAML'
+extraEnv:
+  - name: DENO_DIR
+    value: /deno-cache
+extraVolumes:
+  - name: deno-cache
+    emptyDir: {}
+extraVolumeMounts:
+  - name: deno-cache
+    mountPath: /deno-cache
+extraInitContainers:
+  - name: deno-cache-copy
+    image: '{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}'
+    command:
+      - sh
+      - -c
+      - |
+        src=$(find /app/bundle/programs/server/npm/node_modules/@rocket.chat -maxdepth 3 -type d -name .deno-cache 2>/dev/null | head -1)
+        [ -z "$src" ] && src=$(find /app -type d -name .deno-cache -prune 2>/dev/null | head -1)
+        if [ -n "$src" ]; then
+          cp -R "$src"/. /deno-cache/ && echo "Copied Deno cache from $src"
+        else
+          echo "WARNING: no .deno-cache found in image; Apps Engine apps may fail to start"
+        fi
+    volumeMounts:
+      - name: deno-cache
+        mountPath: /deno-cache
+YAML
+
+    helm upgrade --install "$RELEASE_NAME" ./rocketchat "${HELM_ARGS[@]}" -f "$OVERRIDES"
+    rm -f "$OVERRIDES"
 
     # Group RC and MongoDB together in the OpenShift topology view.
     # Must label ALL resources — deployment, service, route, PVC — for

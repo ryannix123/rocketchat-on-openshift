@@ -1,0 +1,5 @@
+# Helm chart is pulled at the pinned version by deploy.sh — do not commit it
+rocketchat/
+
+# Generated credentials
+rocketchat-credentials.txt

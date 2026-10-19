@@ -1,7 +1,7 @@
 # 🚀 Rocket.Chat on OpenShift — Zero Privilege Deployment
 
 [![OpenShift](https://img.shields.io/badge/OpenShift-4.x-red?logo=redhatopenshift)](https://www.redhat.com/en/technologies/cloud-computing/openshift)
-[![Rocket.Chat](https://img.shields.io/badge/Rocket.Chat-8.x-red?logo=rocketdotchat&logoColor=white)](https://rocket.chat)
+[![Rocket.Chat](https://img.shields.io/badge/Rocket.Chat-8.8.1-red?logo=rocketdotchat&logoColor=white)](https://rocket.chat)
 [![SCC](https://img.shields.io/badge/SCC-restricted-brightgreen)](https://docs.openshift.com/container-platform/latest/authentication/managing-security-context-constraints.html)
 [![MongoDB](https://img.shields.io/badge/MongoDB-8.2-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com)
 [![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
@@ -40,7 +40,26 @@ Your data persists in the PVCs — only the pods are stopped during hibernation.
 
 ## ⚠️ Important: MongoDB Changes
 
-> **January 2025 Update**: Bitnami has discontinued MongoDB images following the VMware/Broadcom acquisition. Rocket.Chat 8.x requires MongoDB 8.2+, which is no longer available from Bitnami. This deployment uses the official MongoDB Community Server image deployed separately from the Helm chart.
+> **January 2025 Update**: Bitnami has discontinued MongoDB images following the VMware/Broadcom acquisition. Rocket.Chat 8.x refuses to start on MongoDB below 7.0 and warns below 8.0. This deployment uses the official MongoDB Community Server 8.2 image deployed separately from the Helm chart.
+
+## 🔄 Versions & Upgrades
+
+The deploy script pins a tested combination:
+
+| Component | Version | Override |
+|-----------|---------|----------|
+| Rocket.Chat | `8.8.1` | `--rc-version` or `RC_VERSION` |
+| Helm chart | `7.0.2` | `--chart-version` or `CHART_VERSION` |
+| MongoDB | `8.2` (UBI9) | — |
+
+The Helm chart is **not** stored in this repo. `deploy.sh` pulls the pinned chart version and re-pulls it automatically if your local copy is a different version.
+
+```bash
+# Prefer the long-term-support release instead
+./deploy.sh --rc-version 8.5.4 --admin-user admin
+```
+
+> **Chart 7.x changed the image UID from 999 to 65533.** OpenShift ignores both and assigns a random UID, which matters for one thing in Rocket.Chat 8.5+: the Apps Engine's Deno cache lives in `/app` and is only writable by UID 65533. The script adds an init container that copies that cache into a writable `emptyDir` and points `DENO_DIR` at it, so marketplace apps install and start normally under the `restricted-v2` SCC.
 
 ---
 
@@ -239,7 +258,7 @@ MongoDB runs as a single-node replica set (`rs0`) to enable change streams for r
 
 ### Helm Values
 
-The deploy script patches the official Rocket.Chat Helm chart to work with OpenShift's restricted SCC by removing hardcoded `runAsUser: 999` and `fsGroup: 999` values.
+The deploy script patches the official Rocket.Chat Helm chart to work with OpenShift's restricted SCC by commenting out any hardcoded `runAsUser` / `fsGroup` values (`65533` in chart 7.x, `999` in 6.x), and also passes `securityContext=null` and `containerSecurityContext=null` as a second safeguard.
 
 Key values passed to Helm:
 
@@ -252,6 +271,11 @@ nats:
   enabled: false          # Not needed without microservices
 externalMongodbUrl: mongodb://admin:<password>@mongodb:27017/rocketchat?authSource=admin&replicaSet=rs0
 host: <auto-detected>
+image:
+  tag: 8.8.1              # --rc-version
+extraEnv:
+  - name: DENO_DIR        # Apps Engine cache, writable under a random UID
+    value: /deno-cache
 ```
 
 ---
@@ -358,26 +382,41 @@ This is a great way to lock down a POC or demo instance to only your team's IPs 
 If you see errors like:
 ```
 unable to validate against any security context constraint: 
-.spec.securityContext.fsGroup: Invalid value: []int64{999}: 999 is not an allowed group
+.spec.securityContext.fsGroup: Invalid value: []int64{65533}: 65533 is not an allowed group
 ```
 
-This means the Helm chart still has hardcoded security contexts. Re-run the setup or verify the patch:
+This means the Helm chart still has hardcoded security contexts (`65533` in chart 7.x, `999` in older charts). Check the patch:
 
 ```bash
-grep -n "999" rocketchat/values.yaml
+grep -nE '^[[:space:]]*(runAsUser|fsGroup): [0-9]+' rocketchat/values.yaml
 ```
 
-If you see uncommented `runAsUser: 999` or `fsGroup: 999`, run `./deploy.sh setup` again.
+If anything prints, delete the local chart and redeploy so it's pulled and patched fresh:
+
+```bash
+rm -rf rocketchat/
+./deploy.sh --admin-user admin
+```
+
+### Apps Fail to Install or Start (EACCES)
+
+If installing a marketplace app fails with a permission error, confirm the Deno cache was copied into the writable volume:
+
+```bash
+oc logs deployment/rocketchat-rocketchat -c deno-cache-copy
+oc exec deployment/rocketchat-rocketchat -- sh -c 'echo $DENO_DIR; ls /deno-cache | head'
+```
+
+You should see `Copied Deno cache from ...` and a populated `/deno-cache`.
 
 ### MongoDB Version Errors
 
 If Rocket.Chat logs show:
 ```
-YOUR CURRENT MONGODB VERSION IS NOT SUPPORTED BY ROCKET.CHAT,
-PLEASE UPGRADE TO VERSION 8.2 OR LATER
+YOUR CURRENT MONGODB VERSION IS NOT SUPPORTED BY ROCKET.CHAT
 ```
 
-Ensure you're using the standalone MongoDB deployment with `mongodb/mongodb-community-server:8.2-ubi9`, not the Bitnami subchart.
+Rocket.Chat 8.x needs MongoDB 7.0 or newer. Ensure you're using the standalone MongoDB deployment with `mongodb/mongodb-community-server:8.2-ubi9`, not the Bitnami subchart.
 
 ### Pod CrashLoopBackOff
 
