@@ -16,9 +16,12 @@
 #   ./deploy.sh                     # auto-detect
 #   ./deploy.sh --host custom.host  # explicit override
 
-# Pinned Rocket.Chat release (chart 7.0.2 defaults to 8.6.1)
+# Pinned Rocket.Chat release (chart 7.0.2 defaults to 8.6.1).
+# 8.9.0 is LTS, supported until Oct 31, 2027.
+# To avoid Docker Hub rate limits, mirror the image and set repository, e.g.:
+#   repository: quay.io/<you>/rocket.chat
 image:
-  tag: "8.8.1"
+  tag: "8.9.0"
 
 # Ingress configuration
 # Disabled — deploy.sh creates an OpenShift Route explicitly via oc create route,
@@ -54,35 +57,10 @@ externalMongodbOplogUrl: "mongodb://admin:<your-password>@mongodb.<your-namespac
 containerSecurityContext: null
 securityContext: null
 
-# Apps Engine (Rocket.Chat 8.5+) writes to its Deno cache, which the image
-# ships inside /app owned by UID 65533. Copy it into a writable emptyDir so
-# apps work under OpenShift's random UID.
-extraEnv:
-  - name: DENO_DIR
-    value: /deno-cache
-extraVolumes:
-  - name: deno-cache
-    emptyDir: {}
-extraVolumeMounts:
-  - name: deno-cache
-    mountPath: /deno-cache
-extraInitContainers:
-  - name: deno-cache-copy
-    image: '{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}'
-    command:
-      - sh
-      - -c
-      - |
-        src=$(find /app/bundle/programs/server/npm/node_modules/@rocket.chat -maxdepth 3 -type d -name .deno-cache 2>/dev/null | head -1)
-        [ -z "$src" ] && src=$(find /app -type d -name .deno-cache -prune 2>/dev/null | head -1)
-        if [ -n "$src" ]; then
-          cp -R "$src"/. /deno-cache/ && echo "Copied Deno cache from $src"
-        else
-          echo "WARNING: no .deno-cache found in image; Apps Engine apps may fail to start"
-        fi
-    volumeMounts:
-      - name: deno-cache
-        mountPath: /deno-cache
+# Rocket.Chat 8.9+ needs no Apps Engine workaround: apps run on Node with
+# read-only access to /app and write only to /tmp (an emptyDir in this chart).
+# Pinning 8.5-8.8 instead? Those use Deno and need a writable cache under
+# OpenShift's random UID. deploy.sh adds it automatically for those versions.
 
 serviceAccount:
   create: true

@@ -1,10 +1,10 @@
 # 🚀 Rocket.Chat on OpenShift — Zero Privilege Deployment
 
 [![OpenShift](https://img.shields.io/badge/OpenShift-4.x-red?logo=redhatopenshift)](https://www.redhat.com/en/technologies/cloud-computing/openshift)
-[![Rocket.Chat](https://img.shields.io/badge/Rocket.Chat-8.8.1-red?logo=rocketdotchat&logoColor=white)](https://rocket.chat)
+[![Rocket.Chat](https://img.shields.io/badge/Rocket.Chat-8.9.0_LTS-red?logo=rocketdotchat&logoColor=white)](https://rocket.chat)
 [![SCC](https://img.shields.io/badge/SCC-restricted-brightgreen)](https://docs.openshift.com/container-platform/latest/authentication/managing-security-context-constraints.html)
 [![MongoDB](https://img.shields.io/badge/MongoDB-8.2-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com)
-[![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-24.x-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Helm](https://img.shields.io/badge/Helm-Chart-0F1689?logo=helm&logoColor=white)](https://helm.sh)
 
 > **Deploy Rocket.Chat on OpenShift without ANY elevated privileges.** No `anyuid`. No `privileged`. Just pure, security-hardened container goodness designed for multi-tenancy.
@@ -48,24 +48,42 @@ The deploy script pins a tested combination:
 
 | Component | Version | Override |
 |-----------|---------|----------|
-| Rocket.Chat | `8.8.1` | `--rc-version` or `RC_VERSION` |
+| Rocket.Chat | `8.9.0` (LTS, supported until Oct 31, 2027) | `--rc-version` or `RC_VERSION` |
 | Helm chart | `7.0.2` | `--chart-version` or `CHART_VERSION` |
 | MongoDB | `8.2` (UBI9) | — |
+| Image source | Docker Hub via `registry.rocket.chat` | `--image-repo` or `IMAGE_REPO` |
 
 The Helm chart is **not** stored in this repo. `deploy.sh` pulls the pinned chart version and re-pulls it automatically if your local copy is a different version.
 
+Upgrading an existing deployment is the same command you deployed with. It reuses the MongoDB password and the existing admin password:
+
 ```bash
-# Prefer the long-term-support release instead
-./deploy.sh --rc-version 8.5.4 --admin-user admin
+./deploy.sh --admin-user admin
 ```
 
-> **Chart 7.x changed the image UID from 999 to 65533.** OpenShift ignores both and assigns a random UID, which matters for one thing in Rocket.Chat 8.5+: the Apps Engine's Deno cache lives in `/app` and is only writable by UID 65533. The script adds an init container that copies that cache into a writable `emptyDir` and points `DENO_DIR` at it, so marketplace apps install and start normally under the `restricted-v2` SCC.
+> **Chart 7.x changed the image UID from 999 to 65533.** OpenShift ignores both and assigns a random UID. On Rocket.Chat 8.9+ that's all you need: apps run on Node with read-only access to `/app` and write only to `/tmp`. If you pin **8.5 to 8.8**, those releases ran apps under Deno with a cache that only UID 65533 can write, so the script automatically adds an init container that copies it into a writable `emptyDir` and sets `DENO_DIR`.
+
+### Avoiding Docker Hub Rate Limits (Developer Sandbox)
+
+Rocket.Chat images come from Docker Hub. The Sandbox sends everyone's pulls through shared IP addresses, so anonymous pulls often fail with `toomanyrequests` and the pod sits in `ImagePullBackOff`. Mirror the image once from your own machine, then deploy from the mirror:
+
+```bash
+# --all copies every architecture; without it, an Apple Silicon Mac copies only arm64
+skopeo login quay.io
+skopeo copy --all docker://docker.io/rocketchat/rocket.chat:8.9.0 docker://quay.io/<you>/rocket.chat:8.9.0
+
+./deploy.sh --admin-user admin --image-repo quay.io/<you>/rocket.chat
+```
+
+> **Make the Quay repository public.** Repositories created by a CLI push are private by default, and the cluster can't pull them without a pull secret. In Quay: repository → **Settings** → **Make Public**.
+
+Mirror each new version before you upgrade. The tag has to exist on Quay.
 
 ---
 
 ## ✨ Features
 
-- ✅ Rocket.Chat 8.x with Node.js 22 + Meteor 3.0
+- ✅ Rocket.Chat 8.9 LTS with Node.js 24 + Meteor 3.0
 - ✅ Runs as non-root (OpenShift restricted SCC compatible)
 - ✅ Official MongoDB Community Server 8.2 (UBI9-based) with single-node replica set
 - ✅ Helm chart with automatic SCC patching
@@ -136,7 +154,7 @@ oc new-project rocketchat
 ┌─────────────────────────▼───────────────────────────────────┐
 │                   Rocket.Chat Pod                           │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │           Node.js 22 + Meteor 3.0                    │   │
+│  │           Node.js 24 + Meteor 3.0                    │   │
 │  │                   (port 3000)                        │   │
 │  │                                                      │   │
 │  │   • Web interface                                    │   │
@@ -272,10 +290,8 @@ nats:
 externalMongodbUrl: mongodb://admin:<password>@mongodb:27017/rocketchat?authSource=admin&replicaSet=rs0
 host: <auto-detected>
 image:
-  tag: 8.8.1              # --rc-version
-extraEnv:
-  - name: DENO_DIR        # Apps Engine cache, writable under a random UID
-    value: /deno-cache
+  tag: 8.9.0              # --rc-version
+  repository: ...         # only with --image-repo
 ```
 
 ---
@@ -398,9 +414,19 @@ rm -rf rocketchat/
 ./deploy.sh --admin-user admin
 ```
 
-### Apps Fail to Install or Start (EACCES)
+### ImagePullBackOff
 
-If installing a marketplace app fails with a permission error, confirm the Deno cache was copied into the writable volume:
+```bash
+oc get events --sort-by=.lastTimestamp | grep -iE 'pull|image' | tail -5
+```
+
+- **`toomanyrequests`**: Docker Hub's rate limit. See [Avoiding Docker Hub Rate Limits](#avoiding-docker-hub-rate-limits-developer-sandbox).
+- **`unauthorized`** from Quay: the mirror repository is private. Make it public.
+- **`no image found in manifest list for architecture amd64`**: the mirror only has the arm64 image. Re-copy with `skopeo copy --all`.
+
+### Apps Fail to Install or Start (EACCES), 8.5 to 8.8 only
+
+This only applies if you pinned `--rc-version` to 8.5 through 8.8. If installing a marketplace app fails with a permission error, confirm the Deno cache was copied into the writable volume:
 
 ```bash
 oc logs deployment/rocketchat-rocketchat -c deno-cache-copy

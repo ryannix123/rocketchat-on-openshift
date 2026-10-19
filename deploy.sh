@@ -15,9 +15,14 @@ MONGODB_SECRET_NAME="mongodb-secret"
 RELEASE_NAME="rocketchat"
 
 # Pinned, tested versions. Override with --chart-version / --rc-version or env vars.
-# Chart 7.x changed the image UID from 999 to 65533 (see setup_chart and DENO_DIR handling).
+# Chart 7.x changed the image UID from 999 to 65533 (see setup_chart).
+# 8.9.0 is an LTS release (supported until Oct 31, 2027).
 CHART_VERSION="${CHART_VERSION:-7.0.2}"
-RC_VERSION="${RC_VERSION:-8.8.1}"
+RC_VERSION="${RC_VERSION:-8.9.0}"
+
+# Optional image mirror, e.g. quay.io/ryan_nix/rocket.chat. Avoids Docker Hub's
+# anonymous pull rate limit, which the Developer Sandbox's shared egress hits often.
+IMAGE_REPO="${IMAGE_REPO:-}"
 
 show_help() {
     echo "🚀 RocketChat on OpenShift - Deployment Script"
@@ -38,6 +43,7 @@ show_help() {
     echo "  --admin-email <email>   - Admin email (default: admin@example.com)"
     echo "  --rc-version <version>  - Rocket.Chat image tag (default: $RC_VERSION)"
     echo "  --chart-version <ver>   - Rocket.Chat Helm chart version (default: $CHART_VERSION)"
+    echo "  --image-repo <repo>     - Pull Rocket.Chat from a mirror, e.g. quay.io/you/rocket.chat"
     echo ""
     echo "Examples:"
     echo "  $0                                                    # auto-detect, manual wizard"
@@ -129,6 +135,11 @@ resolve_host() {
     local host="${RELEASE_NAME}-${NAMESPACE}.${apps_domain}"
     echo "   Resolved hostname: $host" >&2
     echo "$host"
+}
+
+# True if version $1 >= version $2 (e.g. version_ge 8.9.0 8.5.0)
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]
 }
 
 installed_chart_version() {
@@ -351,6 +362,7 @@ deploy() {
             --admin-email)  ADMIN_EMAIL="$2"; shift 2 ;;
             --rc-version)   RC_VERSION="$2"; shift 2 ;;
             --chart-version) CHART_VERSION="$2"; shift 2 ;;
+            --image-repo)   IMAGE_REPO="$2"; shift 2 ;;
             *)              shift ;;
         esac
     done
@@ -376,6 +388,7 @@ deploy() {
     echo "========================================"
     echo "Namespace:   $NAMESPACE"
     echo "Rocket.Chat: $RC_VERSION (chart $CHART_VERSION)"
+    [ -n "$IMAGE_REPO" ] && echo "Image:       $IMAGE_REPO"
     echo ""
 
     # Resolve hostname (auto-detect or explicit)
@@ -458,20 +471,34 @@ deploy() {
     # at minimum) before RC boots. This prevents a double-rollout.
     HELM_ARGS+=(--set replicaCount=0 --set image.tag="$RC_VERSION")
 
+    # Pull from a mirror if requested. The Deno init container below uses
+    # .Values.image.repository too, so both containers follow the mirror.
+    if [ -n "$IMAGE_REPO" ]; then
+        echo "🪞 Using image mirror: $IMAGE_REPO:$RC_VERSION"
+        HELM_ARGS+=(--set image.repository="$IMAGE_REPO")
+    fi
+
     # -----------------------------------------------------------------------
-    # Apps Engine fix for OpenShift's random UID (Rocket.Chat 8.5+).
+    # Apps Engine fix for OpenShift's random UID — Rocket.Chat 8.5 to 8.8 ONLY.
     #
-    # The Apps Engine runs apps under Deno with DENO_DIR defaulting to a
+    # Those releases run apps under Deno with DENO_DIR defaulting to a
     # pre-built .deno-cache inside /app, owned by UID 65533 and not writable
-    # by the root group. OpenShift's arbitrary UID can read it but not write
-    # it, so marketplace apps fail to start. An init container copies the
-    # cache into a writable emptyDir, and DENO_DIR points the runtime there.
+    # by OpenShift's arbitrary UID, so marketplace apps fail to start. An init
+    # container copies the cache into a writable emptyDir.
+    #
+    # 8.9.0 removed Deno: apps run on Node with read-only access to /app and
+    # write only to /tmp (already an emptyDir), so no fix is needed. Helm
+    # drops these overrides on upgrade because they are simply not passed.
     # -----------------------------------------------------------------------
-    local OVERRIDES
-    # Trailing X's only: BSD/macOS mktemp does not randomize X's before a suffix
-    OVERRIDES=$(mktemp "${TMPDIR:-/tmp}/rocketchat-openshift.XXXXXX")
-    trap 'rm -f "$OVERRIDES"' EXIT
-    cat > "$OVERRIDES" <<'YAML'
+    local HELM_FILES=()
+    local OVERRIDES=""
+    if version_ge "$RC_VERSION" 8.5.0 && ! version_ge "$RC_VERSION" 8.9.0; then
+        echo "🦕 Rocket.Chat $RC_VERSION uses Deno — adding writable Apps Engine cache"
+        # Trailing X's only: BSD/macOS mktemp does not randomize X's before a suffix
+        OVERRIDES=$(mktemp "${TMPDIR:-/tmp}/rocketchat-openshift.XXXXXX")
+        trap 'rm -f "$OVERRIDES"' EXIT
+        HELM_FILES=(-f "$OVERRIDES")
+        cat > "$OVERRIDES" <<'YAML'
 extraEnv:
   - name: DENO_DIR
     value: /deno-cache
@@ -499,9 +526,10 @@ extraInitContainers:
       - name: deno-cache
         mountPath: /deno-cache
 YAML
+    fi
 
-    helm upgrade --install "$RELEASE_NAME" ./rocketchat "${HELM_ARGS[@]}" -f "$OVERRIDES"
-    rm -f "$OVERRIDES"
+    helm upgrade --install "$RELEASE_NAME" ./rocketchat "${HELM_ARGS[@]}" "${HELM_FILES[@]}"
+    [ -n "$OVERRIDES" ] && rm -f "$OVERRIDES"
 
     # Group RC and MongoDB together in the OpenShift topology view.
     # Must label ALL resources — deployment, service, route, PVC — for
